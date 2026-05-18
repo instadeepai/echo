@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - run: rustup default stable
       - uses: astral-sh/setup-uv@v3
       - run: uv python install 3.12
       - run: uv sync --extra docs
