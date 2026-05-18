@@ -1,0 +1,28 @@
+# Rust
+/target/
+
+# Python
+/dist/
+__pycache__/
+*.pyc
+*.so
+*.pyd
+.venv/
+
+# Benchmarks
+.benchmarks/
+.bench-pytest-tmp.json
+bench-*.png
+benches/*.json
+benches/*.png
+
+# Docs
+/site/
+/docs/site/
+
+# Tooling
+.claude
+.worktrees/
+
+# Local-only files (personal scripts, scratch, etc.)
+.local/

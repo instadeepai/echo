@@ -1,0 +1,95 @@
+site_name: echo
+site_description: High-performance distributed replay buffer for RL workloads
+site_url: https://instadeepai.github.io/echo/
+repo_url: https://github.com/instadeepai/echo
+repo_name: instadeepai/echo
+edit_uri: edit/main/docs/src/
+docs_dir: docs/src
+site_dir: docs/site
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [python]
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            show_signature_annotations: true
+            separate_signature: true
+            members_order: source
+            heading_level: 2
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Guides:
+      - Zero-copy batches: guides/zero-copy.md
+      - Transports: guides/transports.md
+      - TrajectoryAccumulator: guides/trajectory-accumulator.md
+      - In-process use: guides/in-process.md
+      - Reading metrics: guides/metrics.md
+  - Python API:
+      - Server: api/server.md
+      - Clients: api/clients.md
+      - Transports: api/transports.md
+      - TrajectoryAccumulator: api/trajectory-accumulator.md
+      - SampleInfo: api/sample-info.md
+  - Rust internals:
+      - Overview: design/overview.md
+      - Store: design/store.md
+      - Ring buffer: design/ring-buffer.md
+      - Ingress & drainers: design/ingress.md
+      - Selector: design/selector.md
+      - Transport: design/transport.md
+  - Development: development.md

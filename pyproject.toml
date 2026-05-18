@@ -1,0 +1,78 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "id-echo"
+version = "0.1.0"
+description = "A fast distributed replay buffer for reinforcement learning."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "Sasha Abramowitz", email = "s.abramowitz@instadeep.com" }]
+keywords = ["reinforcement-learning", "replay-buffer", "rl", "distributed"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "numpy>=2.1",
+    "optree>=0.10",
+]
+
+[project.urls]
+Homepage = "https://github.com/instadeepai/echo"
+Documentation = "https://instadeepai.github.io/echo/"
+Repository = "https://github.com/instadeepai/echo"
+Issues = "https://github.com/instadeepai/echo/issues"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-benchmark>=4.0",
+    "maturin>=1.0",
+    "matplotlib>=3.8",
+    "ruff>=0.6",
+]
+# Only needed for distributed tests and benchmarks
+distributed = [
+    "ray>=2.9",
+]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.24",
+]
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "python"
+include = [{ path = "python/echo/py.typed", format = "wheel" }, { path = "python/echo/echo.pyi", format = "wheel" }]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+python_files = ["test_*.py", "bench_*.py"]
+testpaths = ["python/tests"]
+
+[tool.uv]
+# Rebuild package when any rust files change
+cache-keys = [{file = "pyproject.toml"}, {file = "Cargo.toml"}, {file = "**/*.rs"}]
+# Local `uv sync` builds in dev profile for fast incremental rebuilds.
+# For release builds (including detailed-metrics diagnostic builds), use
+# `just install` / `just install-telemetry` / `just install-telemetry-from-git`,
+# or invoke pip directly with --config-settings=build-args='--release ...'.
+config-settings = { build-args = '--profile=dev' }
+
+[tool.ruff]
+line-length = 120
