@@ -14,9 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      - name: Set up Rust toolchain
+        run: |
+          rustup default stable
+          rustup component add rustfmt clippy
       - uses: Swatinem/rust-cache@v2
 
       - name: cargo fmt --check
@@ -35,7 +36,8 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Set up Rust toolchain
+        run: rustup default stable
       - uses: Swatinem/rust-cache@v2
 
       - name: Install uv
