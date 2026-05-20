@@ -1,6 +1,11 @@
+<p align="center">
+  <img src="docs/logo.svg" alt="echo" width="180">
+</p>
+
 # echo
 
 <p align="center">
+  <a href="https://github.com/instadeepai/echo/actions/workflows/ci.yml"><img src="https://github.com/instadeepai/echo/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://instadeepai.github.io/echo/"><img src="https://img.shields.io/badge/docs-instadeepai.github.io%2Fecho-blue?style=flat-square&logo=materialformkdocs" alt="Docs"></a>
   <a href="https://pypi.org/project/id-echo/"><img src="https://img.shields.io/pypi/v/id-echo?style=flat-square&logo=pypi&logoColor=white" alt="PyPI"></a>
   <a href="https://github.com/instadeepai/echo/blob/main/pyproject.toml"><img src="https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Finstadeepai%2Fecho%2Fmain%2Fpyproject.toml&style=flat-square&logo=python&logoColor=white&label=python" alt="Python"></a>
@@ -10,8 +15,6 @@ A very fast distributed replay buffer for reinforcement learning. The core
 is a lockfree, pre-allocated Rust ring buffer. Batches come back to Python
 as zero-copy numpy views, with the GIL released while you wait for the next
 batch.
-
-<p align="center"><a href="https://instadeepai.github.io/echo/"><b>📖 Documentation</b></a></p>
 
 ## Install
 
@@ -47,7 +50,7 @@ pytree-agnostic.
 ## Example
 
 A typical setup runs the server on the learner node and clients on rollout
-workers (separate processes or machines).
+workers (separate processes or machines). See more detailed examples in the [documentation](https://instadeepai.github.io/echo/).
 
 **Learner side** (one process):
 
