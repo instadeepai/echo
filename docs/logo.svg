@@ -1,13 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none" stroke-width="5" stroke-linecap="round">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" fill="none" stroke-width="7" stroke-linecap="round">
   <defs>
     <radialGradient id="echoGrad" cx="100" cy="100" r="95" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#6BB6D6"/>
       <stop offset="1" stop-color="#A8D8A0"/>
     </radialGradient>
   </defs>
-  <rect width="200" height="200" fill="white" stroke="none"/>
-  <circle cx="130" cy="100" r="62" stroke="url(#echoGrad)" opacity="0.45"/>
-  <circle cx="118" cy="100" r="44" stroke="url(#echoGrad)" opacity="0.65"/>
-  <circle cx="108" cy="100" r="28" stroke="url(#echoGrad)" opacity="0.85"/>
+  <rect width="200" height="200" fill="none" stroke="none"/>
+  <circle cx="124" cy="100" r="63" stroke="url(#echoGrad)" opacity="0.45"/>
+  <circle cx="116" cy="100" r="47" stroke="url(#echoGrad)" opacity="0.65"/>
+  <circle cx="108" cy="100" r="31" stroke="url(#echoGrad)" opacity="0.85"/>
   <circle cx="100" cy="100" r="15" stroke="url(#echoGrad)" opacity="1"/>
 </svg>
