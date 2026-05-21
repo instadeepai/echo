@@ -46,7 +46,7 @@ class TrajectoryAccumulator:
             )
 
         def _write_slot(stored, incoming):
-            stored[s:s + 1] = incoming
+            np.atleast_1d(stored)[s:s + 1] = incoming
             return stored
 
         optree.tree_map_(_write_slot, self._tree[name], data)

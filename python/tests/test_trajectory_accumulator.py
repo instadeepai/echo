@@ -75,6 +75,74 @@ class TestTrajectoryAccumulatorAdd:
             np.testing.assert_array_equal(tree["transition"]["rew"][i], float(i * 10))
 
 
+class TestTrajectoryAccumulatorScalarLeaves:
+    """0-d leaves should be writable without padding to (1,)."""
+
+    def _example(self):
+        return {
+            "step": {
+                "obs": np.empty((3, 4), dtype=np.float32),
+                "reward": np.empty((3,), dtype=np.float32),
+            },
+            "episode": {
+                "ret": np.empty((), dtype=np.float32),
+                "gen": np.empty((), dtype=np.int32),
+            },
+        }
+
+    def test_capacity_inferred_for_zero_d_timescale(self):
+        buf = TrajectoryAccumulator(self._example())
+        assert buf._counts == {"step": 3, "episode": 1}
+
+    def test_write_zero_d_leaves(self):
+        buf = TrajectoryAccumulator(self._example())
+        buf.add("episode", {
+            "ret": np.array(7.5, dtype=np.float32),
+            "gen": np.array(42, dtype=np.int32),
+        })
+        tree = buf._tree
+        assert tree["episode"]["ret"].shape == ()
+        assert tree["episode"]["gen"].shape == ()
+        np.testing.assert_array_equal(tree["episode"]["ret"], 7.5)
+        np.testing.assert_array_equal(tree["episode"]["gen"], 42)
+
+    def test_mixed_zero_d_and_nd_in_same_build(self):
+        buf = TrajectoryAccumulator(self._example())
+        for i in range(3):
+            buf.add("step", {
+                "obs": np.full(4, float(i), dtype=np.float32),
+                "reward": np.array(float(i * 10), dtype=np.float32),
+            })
+        buf.add("episode", {
+            "ret": np.array(99.0, dtype=np.float32),
+            "gen": np.array(5, dtype=np.int32),
+        })
+        tree = buf.build()
+
+        assert tree["step"]["obs"].shape == (3, 4)
+        assert tree["step"]["reward"].shape == (3,)
+        assert tree["episode"]["ret"].shape == ()
+        assert tree["episode"]["gen"].shape == ()
+
+        for i in range(3):
+            np.testing.assert_array_equal(tree["step"]["obs"][i], float(i))
+            np.testing.assert_array_equal(tree["step"]["reward"][i], float(i * 10))
+        np.testing.assert_array_equal(tree["episode"]["ret"], 99.0)
+        np.testing.assert_array_equal(tree["episode"]["gen"], 5)
+
+    def test_zero_d_timescale_full_after_one_add(self):
+        buf = TrajectoryAccumulator(self._example())
+        buf.add("episode", {
+            "ret": np.array(1.0, dtype=np.float32),
+            "gen": np.array(1, dtype=np.int32),
+        })
+        with pytest.raises(IndexError):
+            buf.add("episode", {
+                "ret": np.array(2.0, dtype=np.float32),
+                "gen": np.array(2, dtype=np.int32),
+            })
+
+
 class TestTrajectoryAccumulatorBuild:
     def _fill(self, buf):
         for i in range(N):
