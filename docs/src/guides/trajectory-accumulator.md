@@ -55,21 +55,17 @@ for _ in range(num_rollouts):
 
 `TrajectoryAccumulator` is just pre-allocated numpy arrays plus per-timescale slot
 counters. `add()` writes into the next free slot for that timescale via
-slice assignment; `build()` returns the filled pytree, flips the active
-buffer (so the next round writes into a fresh one without allocating), and
-resets the counters.
+slice assignment; `build()` returns the filled pytree and resets the
+counters. The buffer is reused — no allocation per rollout.
 
 There's no network or Rust involvement; it's purely a way to amortise the
 flatten-and-send cost across many environment steps. The pytree it returns
 goes through the normal `client.send` path.
 
-## Two buffers, no allocation per rollout
-
-`TrajectoryAccumulator` double-buffers internally: two copies of the pytree, with
-`build()` swapping the active one. So while one buffer is being serialised
-and sent, the next rollout can start filling the other without any
-allocation. This matters when rollouts are short relative to flatten +
-network latency.
+The tree returned by `build()` aliases the accumulator's internal buffers,
+so the next `add()` will overwrite it. The usual `client.send(buf.build())`
+pattern is safe because `send` is synchronous and copies the bytes before
+returning — don't hold onto the returned tree across further `add()` calls.
 
 ## Common pitfalls
 

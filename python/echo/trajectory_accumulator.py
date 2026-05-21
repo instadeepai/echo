@@ -5,7 +5,7 @@ import optree
 
 
 class TrajectoryAccumulator:
-    """Multi-timescale accumulator: fixed-size pytree buffer with double-buffering.
+    """Multi-timescale accumulator: fixed-size pytree buffer.
 
     Args:
         example: Dict with timescale names as top-level keys. The leading
@@ -29,12 +29,9 @@ class TrajectoryAccumulator:
                 )
             self._counts[name] = leading
 
-        # Two copies of the pytree for double-buffering.
-        self._trees: list[dict[str, Any]] = [
-            {n: optree.tree_map(np.zeros_like, sub) for n, sub in example.items()},
-            {n: optree.tree_map(np.zeros_like, sub) for n, sub in example.items()},
-        ]
-        self._active = 0
+        self._tree: dict[str, Any] = {
+            n: optree.tree_map(np.zeros_like, sub) for n, sub in example.items()
+        }
         self._slot: dict[str, int] = {name: 0 for name in example}
 
     def add(self, name: str, data: Any) -> None:
@@ -52,15 +49,17 @@ class TrajectoryAccumulator:
             stored[s:s + 1] = incoming
             return stored
 
-        optree.tree_map_(_write_slot, self._trees[self._active][name], data)
+        optree.tree_map_(_write_slot, self._tree[name], data)
         self._slot[name] += 1
 
     def build(self) -> dict[str, Any]:
-        """Return the filled pytree and flip the active buffer."""
-        tree = self._trees[self._active]
-        self._active = 1 - self._active
+        """Return the filled pytree and reset slot counters.
+
+        The returned tree aliases internal buffers; callers must finish using
+        it (e.g. complete the synchronous send) before the next ``add()``.
+        """
         self._slot = {name: 0 for name in self._slot}
-        return tree
+        return self._tree
 
     def reset(self) -> None:
         """Reset slot counters without sending (e.g. on episode abort)."""

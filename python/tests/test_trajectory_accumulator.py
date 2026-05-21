@@ -44,7 +44,7 @@ class TestTrajectoryAccumulatorAdd:
         obs = np.arange(12, dtype=np.float32)
         buf.add("transition", {"obs": obs, "rew": np.array(7.0, dtype=np.float32)})
 
-        tree = buf._trees[buf._active]
+        tree = buf._tree
         np.testing.assert_array_equal(tree["transition"]["obs"][0], obs)
         np.testing.assert_array_equal(tree["transition"]["rew"][0], 7.0)
 
@@ -58,7 +58,7 @@ class TestTrajectoryAccumulatorAdd:
         obs64 = np.ones(12, dtype=np.float64) * 1.5
         buf.add("transition", {"obs": obs64, "rew": np.zeros((), dtype=np.float64)})
 
-        tree = buf._trees[buf._active]
+        tree = buf._tree
         np.testing.assert_allclose(tree["transition"]["obs"][0], 1.5)
 
     def test_add_multiple_slots(self):
@@ -69,7 +69,7 @@ class TestTrajectoryAccumulatorAdd:
                 "rew": np.array(float(i * 10), dtype=np.float32),
             })
 
-        tree = buf._trees[buf._active]
+        tree = buf._tree
         for i in range(N):
             np.testing.assert_array_equal(tree["transition"]["obs"][i], float(i))
             np.testing.assert_array_equal(tree["transition"]["rew"][i], float(i * 10))
@@ -99,24 +99,11 @@ class TestTrajectoryAccumulatorBuild:
         np.testing.assert_array_equal(tree["transition"]["obs"][0], 0.0)
         np.testing.assert_array_equal(tree["summary"]["ret"], [99.0])
 
-    def test_build_flips_active_buffer(self):
+    def test_build_resets_slot_counters(self):
         buf = TrajectoryAccumulator(_EXAMPLE)
-        active_before = buf._active
         self._fill(buf)
         buf.build()
-        assert buf._active != active_before
-
-    def test_build_data_not_clobbered_by_next_add(self):
-        buf = TrajectoryAccumulator(_EXAMPLE)
-        self._fill(buf)
-        tree = buf.build()
-        snapshot = tree["transition"]["obs"].copy()
-        for i in range(N):
-            buf.add("transition", {
-                "obs": np.full(12, 999.0, dtype=np.float32),
-                "rew": np.array(999.0, dtype=np.float32),
-            })
-        np.testing.assert_array_equal(tree["transition"]["obs"], snapshot)
+        assert all(s == 0 for s in buf._slot.values())
 
     def test_reset_clears_slot_counters(self):
         buf = TrajectoryAccumulator(_EXAMPLE)
