@@ -9,6 +9,7 @@ site_dir: docs/site
 
 theme:
   name: material
+  logo: assets/logo.svg
   features:
     - navigation.tabs
     - navigation.sections
