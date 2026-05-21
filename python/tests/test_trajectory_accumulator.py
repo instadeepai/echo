@@ -1,10 +1,8 @@
 import numpy as np
 import pytest
-
+from conftest import free_port, wait_for_listen
 from echo import Server, TcpClient, TcpTransport
 from echo.trajectory_accumulator import TrajectoryAccumulator
-
-from conftest import free_port, wait_for_listen
 
 _EXAMPLE_SMALL = {
     "transition": {"obs": np.empty((2, 4), dtype=np.float32)},
@@ -24,7 +22,7 @@ N = 4
 _EXAMPLE = {
     "transition": {
         "obs": np.empty((N, 12), dtype=np.float32),
-        "rew": np.empty((N,),    dtype=np.float32),
+        "rew": np.empty((N,), dtype=np.float32),
     },
     "summary": {
         "ret": np.empty((1,), dtype=np.float32),
@@ -36,6 +34,84 @@ class TestTrajectoryAccumulatorInit:
     def test_counts_inferred_from_leading_dim(self):
         buf = TrajectoryAccumulator(_EXAMPLE)
         assert buf._counts == {"transition": N, "summary": 1}
+
+    def test_rejects_mismatched_leading_dim_in_buffered_timescale(self):
+        # Buffered timescales (no 0-d leaves) must have all leaves share
+        # leading dim.
+        bad = {
+            "timescale": {
+                "a": np.empty((4, 8), dtype=np.float32),  # leading=4
+                "b": np.empty((3,), dtype=np.float32),  # leading=3
+            },
+        }
+        with pytest.raises(ValueError, match="same leading dimension"):
+            TrajectoryAccumulator(bad)
+
+    def test_zero_d_leaf_marks_timescale_single_item(self):
+        # A 0-d leaf signals "single-item timescale": capacity is 1 and
+        # other leaves may have any per-item shape.
+        spec = {
+            "timescale": {
+                "obs": np.empty((4, 8), dtype=np.float32),  # per-item shape
+                "flag": np.empty((), dtype=np.bool_),  # 0-d marker
+            },
+        }
+        buf = TrajectoryAccumulator(spec)
+        assert buf._counts == {"timescale": 1}
+
+    def test_all_unit_leading_marks_timescale_single_item(self):
+        # Every leaf with shape (1, ...) → single-item, no 0-d marker needed.
+        spec = {
+            "timescale": {
+                "obs": np.empty((1, 8), dtype=np.float32),
+                "head": np.empty((1, 4, 2), dtype=np.float32),
+            },
+        }
+        buf = TrajectoryAccumulator(spec)
+        assert buf._counts == {"timescale": 1}
+
+    def test_single_unit_leading_leaf_is_single_item(self):
+        spec = {"timescale": {"a": np.empty((1,), dtype=np.float32)}}
+        buf = TrajectoryAccumulator(spec)
+        assert buf._counts == {"timescale": 1}
+
+    def test_mixed_unit_and_non_unit_leading_rejected(self):
+        # (1, *) and (5,) — neither all-unit nor matching leading-dim. Falls
+        # through to the buffered branch and fails the invariant.
+        bad = {
+            "timescale": {
+                "a": np.empty((1, 8), dtype=np.float32),  # leading=1
+                "b": np.empty((5,), dtype=np.float32),  # leading=5
+            },
+        }
+        with pytest.raises(ValueError, match="same leading dimension"):
+            TrajectoryAccumulator(bad)
+
+    def test_unit_leading_write_replaces_whole_leaf(self):
+        spec = {"timescale": {"obs": np.empty((1, 4), dtype=np.float32)}}
+        buf = TrajectoryAccumulator(spec)
+        buf.add("timescale", {"obs": np.array([[1.0, 2.0, 3.0, 4.0]], dtype=np.float32)})
+        np.testing.assert_array_equal(buf._tree["timescale"]["obs"], [[1.0, 2.0, 3.0, 4.0]])
+
+    def test_over_index_raises_clear_indexerror(self):
+        spec = {
+            "transition": {
+                "obs": np.empty((N, 12), dtype=np.float32),
+                "rew": np.empty((N,), dtype=np.float32),
+            },
+        }
+        buf = TrajectoryAccumulator(spec)
+        item = {
+            "obs": np.zeros(12, dtype=np.float32),
+            "rew": np.zeros((), dtype=np.float32),
+        }
+        for _ in range(N):
+            buf.add("transition", item)
+        with pytest.raises(
+            IndexError,
+            match=rf"Timescale 'transition' has {N} slots, but you tried to add at index {N}",
+        ):
+            buf.add("transition", item)
 
 
 class TestTrajectoryAccumulatorAdd:
@@ -64,10 +140,13 @@ class TestTrajectoryAccumulatorAdd:
     def test_add_multiple_slots(self):
         buf = TrajectoryAccumulator(_EXAMPLE)
         for i in range(N):
-            buf.add("transition", {
-                "obs": np.full(12, float(i), dtype=np.float32),
-                "rew": np.array(float(i * 10), dtype=np.float32),
-            })
+            buf.add(
+                "transition",
+                {
+                    "obs": np.full(12, float(i), dtype=np.float32),
+                    "rew": np.array(float(i * 10), dtype=np.float32),
+                },
+            )
 
         tree = buf._tree
         for i in range(N):
@@ -96,10 +175,13 @@ class TestTrajectoryAccumulatorScalarLeaves:
 
     def test_write_zero_d_leaves(self):
         buf = TrajectoryAccumulator(self._example())
-        buf.add("episode", {
-            "ret": np.array(7.5, dtype=np.float32),
-            "gen": np.array(42, dtype=np.int32),
-        })
+        buf.add(
+            "episode",
+            {
+                "ret": np.array(7.5, dtype=np.float32),
+                "gen": np.array(42, dtype=np.int32),
+            },
+        )
         tree = buf._tree
         assert tree["episode"]["ret"].shape == ()
         assert tree["episode"]["gen"].shape == ()
@@ -109,14 +191,20 @@ class TestTrajectoryAccumulatorScalarLeaves:
     def test_mixed_zero_d_and_nd_in_same_build(self):
         buf = TrajectoryAccumulator(self._example())
         for i in range(3):
-            buf.add("step", {
-                "obs": np.full(4, float(i), dtype=np.float32),
-                "reward": np.array(float(i * 10), dtype=np.float32),
-            })
-        buf.add("episode", {
-            "ret": np.array(99.0, dtype=np.float32),
-            "gen": np.array(5, dtype=np.int32),
-        })
+            buf.add(
+                "step",
+                {
+                    "obs": np.full(4, float(i), dtype=np.float32),
+                    "reward": np.array(float(i * 10), dtype=np.float32),
+                },
+            )
+        buf.add(
+            "episode",
+            {
+                "ret": np.array(99.0, dtype=np.float32),
+                "gen": np.array(5, dtype=np.int32),
+            },
+        )
         tree = buf.build()
 
         assert tree["step"]["obs"].shape == (3, 4)
@@ -132,24 +220,33 @@ class TestTrajectoryAccumulatorScalarLeaves:
 
     def test_zero_d_timescale_full_after_one_add(self):
         buf = TrajectoryAccumulator(self._example())
-        buf.add("episode", {
-            "ret": np.array(1.0, dtype=np.float32),
-            "gen": np.array(1, dtype=np.int32),
-        })
+        buf.add(
+            "episode",
+            {
+                "ret": np.array(1.0, dtype=np.float32),
+                "gen": np.array(1, dtype=np.int32),
+            },
+        )
         with pytest.raises(IndexError):
-            buf.add("episode", {
-                "ret": np.array(2.0, dtype=np.float32),
-                "gen": np.array(2, dtype=np.int32),
-            })
+            buf.add(
+                "episode",
+                {
+                    "ret": np.array(2.0, dtype=np.float32),
+                    "gen": np.array(2, dtype=np.int32),
+                },
+            )
 
 
 class TestTrajectoryAccumulatorBuild:
     def _fill(self, buf):
         for i in range(N):
-            buf.add("transition", {
-                "obs": np.full(12, float(i), dtype=np.float32),
-                "rew": np.array(float(i), dtype=np.float32),
-            })
+            buf.add(
+                "transition",
+                {
+                    "obs": np.full(12, float(i), dtype=np.float32),
+                    "rew": np.array(float(i), dtype=np.float32),
+                },
+            )
         buf.add("summary", {"ret": np.array([99.0], dtype=np.float32)})
 
     def test_build_returns_dict(self):
