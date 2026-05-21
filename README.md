@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="docs/logo.svg" alt="echo" width="180">
+  <img src="docs/src/assets/logo.svg" alt="echo" width="320">
 </p>
-
-# echo
 
 <p align="center">
   <a href="https://github.com/instadeepai/echo/actions/workflows/ci.yml"><img src="https://github.com/instadeepai/echo/actions/workflows/ci.yml/badge.svg" alt="CI"></a>

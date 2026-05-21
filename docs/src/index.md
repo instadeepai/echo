@@ -1,4 +1,6 @@
-# echo
+<p align="center">
+  <img src="assets/logo.svg" alt="echo" width="320">
+</p>
 
 A very fast distributed replay buffer for reinforcement learning. The core
 is a lockfree, pre-allocated Rust ring buffer; batches come back to Python

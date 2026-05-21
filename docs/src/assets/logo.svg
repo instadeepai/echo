@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 250" fill="none">
+  <title>echo</title>
+  <defs>
+    <style><![CDATA[
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@200&display=swap');
+    ]]></style>
+  </defs>
+  <text x="30" y="196"
+        font-family="'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif"
+        font-size="256"
+        font-weight="200"
+        letter-spacing="4"
+        fill="#0F766E">ech</text>
+
+  <g stroke="#0F766E" stroke-width="9" fill="none">
+    <ellipse cx="507" cy="130" rx="58" ry="65"/>
+    <ellipse cx="499" cy="130" rx="44" ry="49"/>
+    <ellipse cx="491" cy="130" rx="30" ry="34"/>
+    <ellipse cx="483" cy="130" rx="16" ry="18"/>
+  </g>
+  <!-- <circle cx="535" cy="130" r="60" stroke="#0F766E" stroke-width="20"/> -->
+</svg>
