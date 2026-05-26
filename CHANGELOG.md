@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-05-26
+
+- `TrajectoryAccumulator` better supports single and buffered timescales
+    - Buffered if: all leaves have a leading dim > 1
+    - Single if: all leaves have leading dims == 1 or there is a single scalar
+- Guide and API reference cover both accumulator modes and the detection rule.
+- New project logo and README polish (#3).
+
+## Pull Requests
+- docs: add logo by @sash-a in https://github.com/instadeepai/echo/pull/3
+- feat: better accumulator by @sash-a in https://github.com/instadeepai/echo/pull/4
+
+**Full Changelog**: https://github.com/instadeepai/echo/compare/v0.1.0...v0.1.1
+
 ## [0.1.0] - 2026-05-18
 
 Initial public release.
