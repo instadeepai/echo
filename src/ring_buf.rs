@@ -34,10 +34,20 @@ impl PytreeRingBuf {
         );
         assert!(!slot_bytes.is_empty(), "slot_bytes must not be empty");
 
-        let buffers = slot_bytes
+        let buffers: Vec<UnsafeCell<Vec<u8>>> = slot_bytes
             .iter()
             .map(|&bytes| UnsafeCell::new(vec![0u8; bytes * capacity]))
             .collect();
+
+        // Optionally page-lock each buffer (ECHO_PIN_HOST_MEMORY=1) so that a
+        // downstream `jax.device_put` of the numpy views is a fast, truly-async
+        // H2D DMA rather than a synchronous host->device staging copy. No-op
+        // without CUDA. Buffers are contiguous and never reallocated, so the
+        // registration stays valid for the buffer's life.
+        for cell in &buffers {
+            let buf = unsafe { &mut *cell.get() };
+            crate::host_pinning::pin(buf.as_mut_ptr(), buf.len());
+        }
 
         Self {
             buffers,
@@ -117,3 +127,14 @@ unsafe impl Sync for PytreeRingBuf {}
 
 // Safety: All data is heap-allocated and owned; transfer between threads is safe.
 unsafe impl Send for PytreeRingBuf {}
+
+impl Drop for PytreeRingBuf {
+    fn drop(&mut self) {
+        // Unregister (un-pin) before the backing Vecs are freed. Drop::drop runs
+        // before the struct's fields are dropped, so the memory is still valid.
+        for cell in &self.buffers {
+            let buf = unsafe { &mut *cell.get() };
+            crate::host_pinning::unpin(buf.as_mut_ptr(), buf.len());
+        }
+    }
+}
