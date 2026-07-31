@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "id-echo"
-version = "0.1.2"
+version = "0.2.0"
 description = "A fast distributed replay buffer for reinforcement learning."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -64,6 +64,9 @@ include = [{ path = "python/echo/py.typed", format = "wheel" }, { path = "python
 pythonpath = ["."]
 python_files = ["test_*.py", "bench_*.py"]
 testpaths = ["python/tests"]
+markers = [
+    "gpu: needs a usable CUDA device; skipped automatically when none is present",
+]
 
 [tool.uv]
 # Rebuild package when any rust files change

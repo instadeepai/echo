@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use numpy::npyffi::{
@@ -98,8 +99,10 @@ pub struct PyServer {
 #[pymethods]
 impl PyServer {
     #[new]
-    #[pyo3(signature = (shapes, dtype_sizes, batch_size, transport=None, num_buffers=3, num_drainers=8, producer_queue_size=8))]
+    #[pyo3(signature = (shapes, dtype_sizes, batch_size, transport=None, num_buffers=3, num_drainers=8, producer_queue_size=8, pin_host_memory=false))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
+        py: Python<'_>,
         shapes: Vec<Vec<usize>>,
         dtype_sizes: Vec<usize>,
         batch_size: usize,
@@ -107,6 +110,7 @@ impl PyServer {
         num_buffers: usize,
         num_drainers: usize,
         producer_queue_size: usize,
+        pin_host_memory: bool,
     ) -> PyResult<Self> {
         if shapes.len() != dtype_sizes.len() {
             return Err(PyValueError::new_err(
@@ -123,7 +127,7 @@ impl PyServer {
 
         let capacity = batch_size * num_buffers;
         let metrics = Metrics::new(num_drainers);
-        let store = Arc::new(Store::new(
+        let mut store = Store::new(
             specs,
             batch_size,
             num_buffers,
@@ -133,7 +137,18 @@ impl PyServer {
                 Some(metrics.clone()),
             )),
             Box::new(FifoRemover::new()),
-        ));
+        );
+
+        // The page-locked guarantee: if this constructor returns, every ring
+        // buffer is registered. Anything short of that raises, so a caller can
+        // never measure a workload against a pinning path that silently did
+        // nothing. Nothing is loaded at all when the caller didn't ask.
+        if pin_host_memory {
+            store
+                .pin_host_memory(&cuda_vendor_roots(py))
+                .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+        }
+        let store = Arc::new(store);
 
         // Drainer pool + transport are only needed when there's a network
         // transport; in-process submit() skips both and writes directly.
@@ -248,6 +263,30 @@ impl PyServer {
         }
         self.store.shutdown();
     }
+}
+
+/// CUDA vendor package directories, located through Python's import machinery.
+///
+/// Rung 2 of the CUDA resolution ladder searches beneath these, which is how
+/// pinning works with a pip-installed CUDA runtime and without any loader-path
+/// environment variable. `nvidia` is a namespace package, so `__path__` is an
+/// iterable of every site-packages directory contributing to it.
+///
+/// An absent or unusable package just means that rung finds nothing; the other
+/// two rungs still run, and total failure reports every path probed.
+fn cuda_vendor_roots(py: Python<'_>) -> Vec<PathBuf> {
+    let Ok(vendor) = py.import("nvidia") else {
+        return Vec::new();
+    };
+    let Ok(path) = vendor.getattr("__path__") else {
+        return Vec::new();
+    };
+    let Ok(entries) = path.try_iter() else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(|entry| entry.ok()?.extract::<PathBuf>().ok())
+        .collect()
 }
 
 /// Create a 1-D uint8 numpy array that is a view into existing memory.

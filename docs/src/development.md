@@ -22,6 +22,27 @@ cargo test                       # Rust unit + integration tests
 uv run pytest python/tests/ -v   # Python tests
 ```
 
+### Working on host-memory pinning
+
+The [pinning](guides/host-memory-pinning.md) tests that need a GPU carry the
+`gpu` marker and skip automatically when no device is present, so CI needs no
+per-runner configuration.
+
+To exercise the CUDA-runtime resolution ladder locally, install a runtime wheel
+into the checkout's venv:
+
+```bash
+uv pip install nvidia-cuda-runtime      # CUDA 13; use nvidia-cuda-runtime-cu12 for CUDA 12
+```
+
+Without it only rung 1 (already-mapped libraries) can hit, and on a machine with
+no system CUDA install nothing resolves at all — the pinning tests then report
+that they skipped rather than failing. The wheel is deliberately *not* a `dev`
+extra: CI is CPU-only and should not download a CUDA runtime.
+
+The Rust tests find the wheel by looking under `.venv/lib/python*/site-packages/`
+in the checkout, since `cargo test` has no Python interpreter to ask.
+
 ## Benchmarks
 
 ```bash

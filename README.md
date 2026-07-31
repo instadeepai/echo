@@ -44,6 +44,9 @@ pytree-agnostic.
 - GIL released while waiting for batches
 - FIFO sampling (with more strategies planned)
 - Detailed metrics exposed per batch
+- Optional CUDA [host-memory pinning](https://instadeepai.github.io/echo/guides/host-memory-pinning/)
+  of the ring buffers, so a host-to-device copy of a batch is a real DMA
+  transfer rather than a chunked staging copy that blocks the calling thread
 
 ## Example
 
