@@ -63,9 +63,30 @@ Benchmark results land in `benches/`.
 ## Docs
 
 ```bash
-uv run --extra docs mkdocs serve   # live-reload on http://127.0.0.1:8000
-uv run --extra docs mkdocs build   # static site to site/
+just docs-serve   # live-reload on http://127.0.0.1:8000/echo/
+just docs         # static site to docs/site/
 ```
+
+Note the **`/echo/` path prefix** — `mkdocs serve` honours `site_url`, so
+`http://127.0.0.1:8000/` alone 404s. The address it prints on startup is correct.
+
+Working on a remote box, `docs-serve` binds to loopback only and is invisible from
+your laptop. Either forward the port from the client side, which needs no change
+here:
+
+```bash
+ssh -L 8000:localhost:8000 you@remote-box    # then browse http://localhost:8000/echo/
+```
+
+or bind to an interface the client can reach:
+
+```bash
+just docs-serve-on                  # 0.0.0.0:8000 — all interfaces
+just docs-serve-on 10.0.0.5:8000    # just this one
+```
+
+Prefer the tunnel, or a specific private interface, over `0.0.0.0` on an untrusted
+network: `mkdocs serve` is a development server with no authentication.
 
 The docs are built and deployed by `.github/workflows/docs.yml` on every
 push to `main`.
