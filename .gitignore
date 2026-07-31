@@ -23,6 +23,9 @@ benches/*.png
 # Tooling
 .claude
 .worktrees/
+CLAUDE.md
+/docs/agents/
+.scratch/
 
 # Local-only files (personal scripts, scratch, etc.)
 .local/
