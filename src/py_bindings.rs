@@ -139,10 +139,9 @@ impl PyServer {
             Box::new(FifoRemover::new()),
         );
 
-        // The page-locked guarantee: if this constructor returns, every ring
-        // buffer is registered. Anything short of that raises, so a caller can
-        // never measure a workload against a pinning path that silently did
-        // nothing. Nothing is loaded at all when the caller didn't ask.
+        // The guarantee: if this constructor returns, every ring buffer is
+        // registered. Anything short of that raises, so a workload can never be
+        // measured against a pinning path that silently did nothing.
         if pin_host_memory {
             store
                 .pin_host_memory(&cuda_vendor_roots(py))
@@ -265,15 +264,12 @@ impl PyServer {
     }
 }
 
-/// CUDA vendor package directories, located through Python's import machinery.
+/// CUDA vendor package directories, for rung 2 of the resolution ladder. This
+/// is how pinning finds a pip-installed runtime with no loader-path variable set.
 ///
-/// Rung 2 of the CUDA resolution ladder searches beneath these, which is how
-/// pinning works with a pip-installed CUDA runtime and without any loader-path
-/// environment variable. `nvidia` is a namespace package, so `__path__` is an
-/// iterable of every site-packages directory contributing to it.
-///
-/// An absent or unusable package just means that rung finds nothing; the other
-/// two rungs still run, and total failure reports every path probed.
+/// `nvidia` is a namespace package, so `__path__` is an iterable of every
+/// site-packages directory contributing to it. An absent or unusable package
+/// just means that rung finds nothing.
 fn cuda_vendor_roots(py: Python<'_>) -> Vec<PathBuf> {
     let Ok(vendor) = py.import("nvidia") else {
         return Vec::new();

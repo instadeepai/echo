@@ -68,8 +68,8 @@ impl Store {
 
     /// Page-lock the ring buffers; see [`PytreeRingBuf::pin_host_memory`].
     ///
-    /// `&mut self` puts this between construction and sharing the store, so a
-    /// caller that then fails to finish building unregisters by dropping it.
+    /// `&mut self` puts this before the store is shared, so a caller that fails
+    /// to finish building unregisters by dropping it.
     pub(crate) fn pin_host_memory(
         &mut self,
         cuda_vendor_roots: &[PathBuf],

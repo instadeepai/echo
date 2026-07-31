@@ -22,9 +22,8 @@ pub struct PytreeRingBuf {
     slot_bytes: Vec<usize>,
     /// Total number of slots.
     capacity: usize,
-    /// The CUDA runtime the buffers are registered with, once they are.
-    /// `Some` is exactly the condition for `Drop` having registrations to
-    /// reverse, and holding it here keeps `Drop` off any process-global.
+    /// The runtime the buffers are registered with, once they are. `Some` is
+    /// `Drop`'s cue to unregister, and holding it here keeps `Drop` off a global.
     pinned_with: Option<CudaApi>,
 }
 
@@ -54,21 +53,17 @@ impl PytreeRingBuf {
         }
     }
 
-    /// Page-lock every buffer, so a downstream host-to-device copy of a sampled
-    /// view is a DMA transfer rather than a chunked staging copy.
+    /// Page-lock every buffer, so a host-to-device copy of a sampled view is a
+    /// DMA transfer rather than a chunked staging copy. All or nothing: a partial
+    /// failure is rolled back before the error returns.
     ///
-    /// Either every buffer ends up locked or none does — a partial failure is
-    /// rolled back before the error returns. That is why this is a separate
-    /// fallible step on a constructed buffer rather than part of `new`: a
-    /// constructor returning `Err` never runs `Drop`, so registering there would
-    /// need a hand-written unregister loop on the error path. Here `Drop` owns
-    /// rollback for both the failure path and normal teardown.
-    ///
-    /// `cuda_vendor_roots` are the CUDA vendor package directories located
-    /// through Python's import machinery; see [`crate::host_pinning`].
+    /// Separate from `new` because a constructor returning `Err` never runs
+    /// `Drop`, so registering there would need a hand-written unregister loop on
+    /// the error path. Here `Drop` owns rollback and teardown alike.
     ///
     /// The buffers are contiguous and never reallocated, so a registration stays
-    /// valid for the buffer's whole life.
+    /// valid for the buffer's whole life. `cuda_vendor_roots` comes from Python's
+    /// import machinery; see [`crate::host_pinning`].
     pub(crate) fn pin_host_memory(
         &mut self,
         cuda_vendor_roots: &[PathBuf],
@@ -76,14 +71,11 @@ impl PytreeRingBuf {
         self.pin_with(*host_pinning::api(cuda_vendor_roots)?)
     }
 
-    /// [`Self::pin_host_memory`] against an already-resolved runtime.
-    ///
-    /// Split out so tests can drive registration and teardown with stubbed CUDA
-    /// entry points, on a machine with no GPU.
+    /// [`Self::pin_host_memory`] against an already-resolved runtime. Split out
+    /// so tests can drive registration and teardown with stubs, without a GPU.
     pub(crate) fn pin_with(&mut self, api: CudaApi) -> Result<(), PinError> {
-        // SAFETY: the regions are this buffer's own allocations, which live as
-        // long as `self` and are never reallocated, and `Drop` unregisters them
-        // before they are freed.
+        // SAFETY: the regions are `self`'s own allocations, never reallocated,
+        // and `Drop` unregisters them before they are freed.
         unsafe { host_pinning::pin_all(&api, &self.regions())? };
         self.pinned_with = Some(api);
         Ok(())
@@ -180,10 +172,10 @@ impl Drop for PytreeRingBuf {
         let Some(api) = self.pinned_with else {
             return;
         };
-        // Unregister before the backing Vecs are freed. Drop::drop runs before
-        // the struct's fields are dropped, so the memory is still valid.
+        // Drop::drop runs before the fields are dropped, so the memory is still
+        // valid here.
         // SAFETY: `pinned_with` is Some only after `pin_with` registered exactly
-        // these regions through this same api, and they are still valid here.
+        // these regions through this same api.
         unsafe { host_pinning::unpin_all(&api, &self.regions()) };
     }
 }
