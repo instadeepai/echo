@@ -1,8 +1,5 @@
 //! Finding the CUDA runtime: a three-rung ladder, tried in order, accumulating
 //! every attempted path so a total failure can say what it tried.
-//!
-//! The rungs exist because a single soname `dlopen` does not cover the
-//! deployment shapes — that is precisely how pinning came to be a silent no-op.
 
 use std::ffi::{CStr, CString};
 use std::os::raw::c_void;
@@ -19,7 +16,7 @@ const SONAMES: [&str; 3] = ["libcudart.so.13", "libcudart.so.12", "libcudart.so"
 
 /// Which rung of the resolution ladder produced a candidate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Rung {
+pub enum Rung {
     /// Rung 1: a runtime the process already has mapped.
     AlreadyLoaded,
     /// Rung 2: a runtime shipped by an installed CUDA wheel.
@@ -29,7 +26,7 @@ enum Rung {
 }
 
 impl Rung {
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Rung::AlreadyLoaded => "already-loaded scan",
             Rung::InstalledWheel => "installed-wheel search",
@@ -40,10 +37,10 @@ impl Rung {
 
 /// One thing to hand to `dlopen`, in ladder order.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Candidate {
+pub struct Candidate {
     /// An absolute path (rungs 1 and 2) or a bare soname (rung 3).
-    name: String,
-    rung: Rung,
+    pub name: String,
+    pub rung: Rung,
 }
 
 /// True for a CUDA runtime shared object, by file name.
@@ -59,7 +56,7 @@ fn is_runtime_lib(path: &str) -> bool {
 /// Hits whenever the framework has already initialised CUDA. `dlopen` on the
 /// absolute path of a mapped library reuses that mapping rather than loading a
 /// second copy.
-pub(super) fn scan_mapped_runtimes(maps: &str) -> Vec<String> {
+pub fn scan_mapped_runtimes(maps: &str) -> Vec<String> {
     let mut found: Vec<String> = Vec::new();
     for line in maps.lines() {
         // The pathname is the last field and is absolute, so it starts at the
@@ -88,7 +85,7 @@ const WHEEL_SEARCH_DEPTH: usize = 4;
 /// than a named component is load-bearing: CUDA 13 ships one consolidated wheel
 /// (`nvidia/cu13/lib/`), CUDA 12 one per component (`nvidia/cuda_runtime/lib/`),
 /// so naming the component finds nothing on a CUDA 13 install.
-fn search_wheel_roots(roots: &[PathBuf]) -> Vec<String> {
+pub fn search_wheel_roots(roots: &[PathBuf]) -> Vec<String> {
     let mut found: Vec<PathBuf> = Vec::new();
     let mut frontier: Vec<(PathBuf, usize)> = roots.iter().map(|r| (r.clone(), 0)).collect();
 
@@ -141,7 +138,7 @@ fn soname_major(name: &str) -> Option<u32> {
 
 /// The full ladder, in the order it will be tried. Pure, so the ordering is
 /// unit-testable without a GPU: reordering it is how this feature broke before.
-fn candidates(maps: &str, vendor_roots: &[PathBuf]) -> Vec<Candidate> {
+pub fn candidates(maps: &str, vendor_roots: &[PathBuf]) -> Vec<Candidate> {
     let rungs = [
         (Rung::AlreadyLoaded, scan_mapped_runtimes(maps)),
         (Rung::InstalledWheel, search_wheel_roots(vendor_roots)),
@@ -195,21 +192,15 @@ fn open(candidate: &Candidate) -> Result<CudaApi, String> {
     // SAFETY: each symbol is transmuted to the signature libcudart declares for
     // it; a name that resolves in libcudart has that signature by definition.
     unsafe {
-        Ok(CudaApi {
-            register: std::mem::transmute::<*mut c_void, RegisterFn>(symbol(
-                handle,
-                c"cudaHostRegister",
-            )?),
-            unregister: std::mem::transmute::<*mut c_void, UnregisterFn>(symbol(
+        Ok(CudaApi::new(
+            std::mem::transmute::<*mut c_void, RegisterFn>(symbol(handle, c"cudaHostRegister")?),
+            std::mem::transmute::<*mut c_void, UnregisterFn>(symbol(
                 handle,
                 c"cudaHostUnregister",
             )?),
-            error_name: std::mem::transmute::<*mut c_void, ErrorNameFn>(symbol(
-                handle,
-                c"cudaGetErrorName",
-            )?),
-            free: std::mem::transmute::<*mut c_void, FreeFn>(symbol(handle, c"cudaFree")?),
-        })
+            std::mem::transmute::<*mut c_void, ErrorNameFn>(symbol(handle, c"cudaGetErrorName")?),
+            std::mem::transmute::<*mut c_void, FreeFn>(symbol(handle, c"cudaFree")?),
+        ))
     }
 }
 
@@ -293,7 +284,7 @@ static API: OnceLock<CudaApi> = OnceLock::new();
 ///
 /// Failures are not cached: a process that retries after its framework has
 /// initialised CUDA should get the later, better answer.
-pub(crate) fn api(vendor_roots: &[PathBuf]) -> Result<&'static CudaApi, PinError> {
+pub fn api(vendor_roots: &[PathBuf]) -> Result<&'static CudaApi, PinError> {
     if let Some(api) = API.get() {
         return Ok(api);
     }
@@ -302,6 +293,3 @@ pub(crate) fn api(vendor_roots: &[PathBuf]) -> Result<&'static CudaApi, PinError
     // reference-counted, so the loser just drops an identical set of pointers.
     Ok(API.get_or_init(|| resolved))
 }
-
-#[cfg(test)]
-mod tests;

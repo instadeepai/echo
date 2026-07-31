@@ -8,7 +8,7 @@ use super::{CudaApi, PinError, Region, CUDA_SUCCESS};
 /// `cudaHostRegisterPortable`: valid in every CUDA context in the process,
 /// including ones created later. This is why pinning takes no device argument
 /// and why N servers across N GPUs in one process need no configuration.
-const CUDA_HOST_REGISTER_PORTABLE: c_uint = 0x01;
+pub const CUDA_HOST_REGISTER_PORTABLE: c_uint = 0x01;
 
 /// Page-lock every region, or leave none of them locked.
 ///
@@ -22,7 +22,7 @@ const CUDA_HOST_REGISTER_PORTABLE: c_uint = 0x01;
 ///   addresses.
 /// - Each region registered here must be passed to [`unpin_all`] before its
 ///   memory is freed.
-pub(crate) unsafe fn pin_all(api: &CudaApi, regions: &[Region]) -> Result<(), PinError> {
+pub unsafe fn pin_all(api: &CudaApi, regions: &[Region]) -> Result<(), PinError> {
     // Registration against an uninitialised runtime fails, so force init.
     // Freeing null frees nothing and never changes the current device, but it is
     // not free: it creates the primary context on the current device, costing
@@ -65,7 +65,7 @@ pub(crate) unsafe fn pin_all(api: &CudaApi, regions: &[Region]) -> Result<(), Pi
 /// # Safety
 /// Every region must currently be registered, by a [`pin_all`] call through
 /// this same `api`, and must still be valid for `len` bytes.
-pub(crate) unsafe fn unpin_all(api: &CudaApi, regions: &[Region]) {
+pub unsafe fn unpin_all(api: &CudaApi, regions: &[Region]) {
     for region in regions {
         if region.len == 0 {
             continue;
@@ -88,6 +88,3 @@ fn error_name(api: &CudaApi, code: c_int) -> String {
         .to_string_lossy()
         .into_owned()
 }
-
-#[cfg(test)]
-mod tests;

@@ -16,49 +16,70 @@
 //! page-locks memory with it. This root holds only what both need — the entry
 //! points, the regions they act on, and the error either can return.
 
-mod register;
-mod resolve;
+pub mod register;
+pub mod resolve;
 
-pub(crate) use register::{pin_all, unpin_all};
-pub(crate) use resolve::api;
+pub use register::{pin_all, unpin_all};
+pub use resolve::api;
 
 use std::fmt;
 use std::os::raw::{c_char, c_int, c_uint, c_void};
 
 /// `cudaError_t cudaHostRegister(void*, size_t, unsigned int)`
-type RegisterFn = unsafe extern "C" fn(*mut c_void, usize, c_uint) -> c_int;
+pub type RegisterFn = unsafe extern "C" fn(*mut c_void, usize, c_uint) -> c_int;
 /// `cudaError_t cudaHostUnregister(void*)`
-type UnregisterFn = unsafe extern "C" fn(*mut c_void) -> c_int;
+pub type UnregisterFn = unsafe extern "C" fn(*mut c_void) -> c_int;
 /// `const char* cudaGetErrorName(cudaError_t)`
-type ErrorNameFn = unsafe extern "C" fn(c_int) -> *const c_char;
+pub type ErrorNameFn = unsafe extern "C" fn(c_int) -> *const c_char;
 /// `cudaError_t cudaFree(void*)`
-type FreeFn = unsafe extern "C" fn(*mut c_void) -> c_int;
+pub type FreeFn = unsafe extern "C" fn(*mut c_void) -> c_int;
 
-const CUDA_SUCCESS: c_int = 0;
+pub const CUDA_SUCCESS: c_int = 0;
 
 /// The CUDA entry points pinning needs.
 ///
 /// Passed explicitly rather than reached through a global so tests can inject
 /// stubs and assert rollback without a GPU.
 #[derive(Clone, Copy)]
-pub(crate) struct CudaApi {
+pub struct CudaApi {
     register: RegisterFn,
     unregister: UnregisterFn,
     error_name: ErrorNameFn,
     free: FreeFn,
 }
 
+impl CudaApi {
+    /// Build an api from raw entry points. `resolve` uses this after `dlsym`;
+    /// tests use it to inject stubs.
+    ///
+    /// # Safety
+    /// Each pointer must be a live function with the signature its type names.
+    pub unsafe fn new(
+        register: RegisterFn,
+        unregister: UnregisterFn,
+        error_name: ErrorNameFn,
+        free: FreeFn,
+    ) -> Self {
+        Self {
+            register,
+            unregister,
+            error_name,
+            free,
+        }
+    }
+}
+
 /// A contiguous host allocation to page-lock. Owns nothing; the validity
 /// invariants live on [`pin_all`] / [`unpin_all`].
 #[derive(Clone, Copy)]
-pub(crate) struct Region {
+pub struct Region {
     pub ptr: *mut u8,
     pub len: usize,
 }
 
 /// Why pinning could not be delivered. On failure nothing is left registered.
 #[derive(Debug)]
-pub(crate) enum PinError {
+pub enum PinError {
     /// No CUDA runtime could be loaded. One line per probed path, so a caller
     /// can fix their environment without reading this source.
     RuntimeUnavailable { probed: Vec<String> },

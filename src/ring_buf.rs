@@ -64,16 +64,13 @@ impl PytreeRingBuf {
     /// The buffers are contiguous and never reallocated, so a registration stays
     /// valid for the buffer's whole life. `cuda_vendor_roots` comes from Python's
     /// import machinery; see [`crate::host_pinning`].
-    pub(crate) fn pin_host_memory(
-        &mut self,
-        cuda_vendor_roots: &[PathBuf],
-    ) -> Result<(), PinError> {
+    pub fn pin_host_memory(&mut self, cuda_vendor_roots: &[PathBuf]) -> Result<(), PinError> {
         self.pin_with(*host_pinning::api(cuda_vendor_roots)?)
     }
 
     /// [`Self::pin_host_memory`] against an already-resolved runtime. Split out
     /// so tests can drive registration and teardown with stubs, without a GPU.
-    pub(crate) fn pin_with(&mut self, api: CudaApi) -> Result<(), PinError> {
+    pub fn pin_with(&mut self, api: CudaApi) -> Result<(), PinError> {
         // SAFETY: the regions are `self`'s own allocations, never reallocated,
         // and `Drop` unregisters them before they are freed.
         unsafe { host_pinning::pin_all(&api, &self.regions())? };

@@ -1,18 +1,221 @@
-//! Tests for registration, rollback and teardown.
+//! Tests for `host_pinning`: the CUDA-runtime resolution ladder, and
+//! registration with its rollback.
 //!
-//! The stubbed half runs anywhere — rollback's only visible consequence is the
-//! *absence* of leaked registrations, which cannot be observed from Python, so it
-//! is checked through the injected API. The rest needs a real GPU and reports a
-//! skip when there isn't one.
+//! The resolution and stub-injected registration tests run anywhere. Rollback's
+//! only visible consequence is the *absence* of leaked registrations, which
+//! cannot be observed from Python, so it is checked through an injected API
+//! rather than externally. The remaining tests need a real CUDA device and
+//! report a skip when there isn't one — Rust has no native test skip, so they
+//! pass rather than fail on CPU-only CI.
 
 use std::cell::RefCell;
 use std::ffi::CString;
-use std::os::raw::c_char;
+use std::os::raw::{c_char, c_int, c_uint, c_void};
 use std::path::PathBuf;
 
-use super::*;
-use crate::host_pinning::resolve::{api, scan_mapped_runtimes};
-use crate::host_pinning::RegisterFn;
+use echo::host_pinning::register::CUDA_HOST_REGISTER_PORTABLE;
+use echo::host_pinning::resolve::{
+    api, candidates, scan_mapped_runtimes, search_wheel_roots, Rung,
+};
+use echo::host_pinning::{pin_all, unpin_all, CudaApi, PinError, Region, RegisterFn, CUDA_SUCCESS};
+use echo::ring_buf::PytreeRingBuf;
+
+// ===========================================================================
+// Resolution: the three-rung ladder
+// ===========================================================================
+
+// --- rung 1: parsing the process's own mapped files ---
+
+/// A runtime mapped as several segments, unrelated libraries, anonymous and
+/// special mappings, a path with a space in it, and a deleted mapping.
+const MAPS_FIXTURE: &str = "\
+55a3c0000000-55a3c0021000 r--p 00000000 fd:01 1179651                    /usr/bin/python3.11
+7f1a00000000-7f1a00021000 r--p 00000000 fd:01 2359310                    /usr/lib/x86_64-linux-gnu/libc.so.6
+7f1a10000000-7f1a10800000 rw-p 00000000 00:00 0
+7f1a20000000-7f1a20a00000 r--p 00000000 fd:01 4194313                    /venv/lib/python3.11/site-packages/nvidia/cu13/lib/libcudart.so.13
+7f1a20a00000-7f1a21400000 r-xp 00a00000 fd:01 4194313                    /venv/lib/python3.11/site-packages/nvidia/cu13/lib/libcudart.so.13
+7f1a30000000-7f1a30100000 r-xp 00000000 fd:01 4194320                    /opt/my libs/libcudart.so.12
+7f1a40000000-7f1a40100000 r-xp 00000000 fd:01 4194321                    /tmp/stale/libcudart.so.11 (deleted)
+7ffd00000000-7ffd00021000 rw-p 00000000 00:00 0                          [stack]
+ffffffffff600000-ffffffffff601000 --xp 00000000 00:00 0                  [vsyscall]
+";
+
+#[test]
+fn scan_finds_each_mapped_runtime_once_in_order() {
+    assert_eq!(
+        scan_mapped_runtimes(MAPS_FIXTURE),
+        vec![
+            "/venv/lib/python3.11/site-packages/nvidia/cu13/lib/libcudart.so.13",
+            "/opt/my libs/libcudart.so.12",
+            "/tmp/stale/libcudart.so.11",
+        ]
+    );
+}
+
+#[test]
+fn scan_ignores_unrelated_libraries() {
+    let maps = "\
+7f1a00000000-7f1a00021000 r-xp 00000000 fd:01 1 /usr/lib/libcudnn.so.9
+7f1a10000000-7f1a10021000 r-xp 00000000 fd:01 2 /usr/lib/libcublas.so.13
+7f1a20000000-7f1a20021000 r-xp 00000000 fd:01 3 /usr/lib/libcudart_static.a
+";
+    assert!(scan_mapped_runtimes(maps).is_empty());
+}
+
+#[test]
+fn scan_of_a_process_with_no_runtime_yields_nothing() {
+    assert!(scan_mapped_runtimes("").is_empty());
+}
+
+// --- rung 2: searching beneath the CUDA vendor package ---
+
+fn touch(path: &std::path::Path) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, b"").unwrap();
+}
+
+#[test]
+fn wheel_search_finds_the_consolidated_layout() {
+    // CUDA 13: one wheel, `nvidia/cu13/lib/`.
+    let root = tempfile::tempdir().unwrap();
+    let nvidia = root.path().join("nvidia");
+    touch(&nvidia.join("cu13/lib/libcudart.so.13"));
+    touch(&nvidia.join("cu13/lib/libcudart_static.a"));
+    touch(&nvidia.join("cudnn/lib/libcudnn.so.9"));
+
+    assert_eq!(
+        search_wheel_roots(std::slice::from_ref(&nvidia)),
+        vec![nvidia
+            .join("cu13/lib/libcudart.so.13")
+            .to_string_lossy()
+            .into_owned()]
+    );
+}
+
+#[test]
+fn wheel_search_finds_the_per_component_layout() {
+    // CUDA 12: one wheel per component, `nvidia/cuda_runtime/lib/`.
+    let root = tempfile::tempdir().unwrap();
+    let nvidia = root.path().join("nvidia");
+    touch(&nvidia.join("cuda_runtime/lib/libcudart.so.12"));
+    touch(&nvidia.join("cublas/lib/libcublas.so.12"));
+
+    assert_eq!(
+        search_wheel_roots(std::slice::from_ref(&nvidia)),
+        vec![nvidia
+            .join("cuda_runtime/lib/libcudart.so.12")
+            .to_string_lossy()
+            .into_owned()]
+    );
+}
+
+#[test]
+fn wheel_search_prefers_the_newest_major_version() {
+    let root = tempfile::tempdir().unwrap();
+    let nvidia = root.path().join("nvidia");
+    touch(&nvidia.join("cuda_runtime/lib/libcudart.so.9"));
+    touch(&nvidia.join("cu13/lib/libcudart.so.13"));
+    touch(&nvidia.join("cuda_runtime/lib/libcudart.so.12"));
+
+    let found = search_wheel_roots(&[nvidia]);
+    let names: Vec<&str> = found
+        .iter()
+        .map(|p| p.rsplit('/').next().unwrap())
+        .collect();
+    assert_eq!(
+        names,
+        vec!["libcudart.so.13", "libcudart.so.12", "libcudart.so.9"]
+    );
+}
+
+#[test]
+fn wheel_search_tolerates_missing_and_empty_roots() {
+    let root = tempfile::tempdir().unwrap();
+    assert!(search_wheel_roots(&[]).is_empty());
+    assert!(search_wheel_roots(&[root.path().join("does-not-exist")]).is_empty());
+    assert!(search_wheel_roots(&[root.path().to_path_buf()]).is_empty());
+}
+
+// --- ladder ordering ---
+
+#[test]
+fn ladder_tries_mapped_then_wheel_then_sonames() {
+    let root = tempfile::tempdir().unwrap();
+    let nvidia = root.path().join("nvidia");
+    touch(&nvidia.join("cu13/lib/libcudart.so.13"));
+    let wheel_lib = nvidia
+        .join("cu13/lib/libcudart.so.13")
+        .to_string_lossy()
+        .into_owned();
+
+    let ladder = candidates(MAPS_FIXTURE, &[nvidia]);
+    let rungs: Vec<Rung> = ladder.iter().map(|c| c.rung).collect();
+    let names: Vec<&str> = ladder.iter().map(|c| c.name.as_str()).collect();
+
+    assert_eq!(
+        rungs,
+        vec![
+            Rung::AlreadyLoaded,
+            Rung::AlreadyLoaded,
+            Rung::AlreadyLoaded,
+            Rung::InstalledWheel,
+            Rung::Soname,
+            Rung::Soname,
+            Rung::Soname,
+        ]
+    );
+    assert_eq!(
+        names,
+        vec![
+            "/venv/lib/python3.11/site-packages/nvidia/cu13/lib/libcudart.so.13",
+            "/opt/my libs/libcudart.so.12",
+            "/tmp/stale/libcudart.so.11",
+            wheel_lib.as_str(),
+            // Versioned before unversioned: the wheels ship no unversioned
+            // symlink, which is what broke this before.
+            "libcudart.so.13",
+            "libcudart.so.12",
+            "libcudart.so",
+        ]
+    );
+}
+
+#[test]
+fn ladder_probes_each_path_once() {
+    // A mapped runtime that is also the one the wheel ships.
+    let root = tempfile::tempdir().unwrap();
+    let nvidia = root.path().join("nvidia");
+    let lib = nvidia.join("cu13/lib/libcudart.so.13");
+    touch(&lib);
+    let maps = format!(
+        "7f1a20000000-7f1a20a00000 r-xp 0 fd:01 1 {}\n",
+        lib.display()
+    );
+
+    let ladder = candidates(&maps, &[nvidia]);
+    let mut names: Vec<&str> = ladder.iter().map(|c| c.name.as_str()).collect();
+    let before = names.len();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), before, "ladder contains a duplicate path");
+}
+
+#[test]
+fn unresolvable_runtime_reports_every_path_probed() {
+    let err = PinError::RuntimeUnavailable {
+        probed: vec![
+            "/a/libcudart.so.13: boom".into(),
+            "libcudart.so: nope".into(),
+        ],
+    };
+    let message = err.to_string();
+    assert!(message.contains("/a/libcudart.so.13: boom"), "{message}");
+    assert!(message.contains("libcudart.so: nope"), "{message}");
+}
+
+// ===========================================================================
+// Registration, rollback and teardown
+// ===========================================================================
 
 // --- registration and rollback, with the CUDA calls stubbed out ---
 
@@ -58,12 +261,8 @@ fn stub_api(register: RegisterFn) -> CudaApi {
     REGISTERED.with(|c| c.borrow_mut().clear());
     UNREGISTERED.with(|c| c.borrow_mut().clear());
     INITIALISED.with(|c| *c.borrow_mut() = 0);
-    CudaApi {
-        register,
-        unregister: stub_unregister,
-        error_name: stub_error_name,
-        free: stub_free,
-    }
+    // SAFETY: the stubs below are live functions with these signatures.
+    unsafe { CudaApi::new(register, stub_unregister, stub_error_name, stub_free) }
 }
 
 /// Dangling, but never dereferenced: only passed to the stub API.
@@ -126,7 +325,7 @@ fn dropping_a_pinned_ring_buffer_unregisters_every_buffer() {
     // Teardown without a GPU: real ring buffer, stubbed CUDA. A leak here
     // would be invisible from Python, hence the injection point.
     let api = stub_api(stub_register_ok);
-    let mut ring = crate::ring_buf::PytreeRingBuf::new(vec![64, 128], 8, 4);
+    let mut ring = PytreeRingBuf::new(vec![64, 128], 8, 4);
     ring.pin_with(api)
         .expect("stubbed registration should succeed");
 
@@ -145,7 +344,7 @@ fn dropping_a_pinned_ring_buffer_unregisters_every_buffer() {
 #[test]
 fn dropping_an_unpinned_ring_buffer_touches_no_cuda_entry_point() {
     let _api = stub_api(stub_register_ok);
-    drop(crate::ring_buf::PytreeRingBuf::new(vec![64], 8, 4));
+    drop(PytreeRingBuf::new(vec![64], 8, 4));
     assert!(REGISTERED.with(|c| c.borrow().is_empty()));
     assert!(UNREGISTERED.with(|c| c.borrow().is_empty()));
 }
@@ -155,7 +354,7 @@ fn a_ring_buffer_whose_registration_fails_leaves_nothing_registered() {
     // The third array is rejected, so the two that took must be unregistered
     // and `Drop` must then do nothing more.
     let api = stub_api(stub_register);
-    let mut ring = crate::ring_buf::PytreeRingBuf::new(vec![64, 64, 64, 64], 8, 4);
+    let mut ring = PytreeRingBuf::new(vec![64, 64, 64, 64], 8, 4);
     ring.pin_with(api).expect_err("the third array should fail");
 
     let after_rollback = UNREGISTERED.with(|c| c.borrow().clone());
@@ -265,7 +464,7 @@ fn a_real_ring_buffer_pins_and_unregisters_on_drop() {
         return;
     }
     let roots = dev_vendor_roots();
-    let mut ring = crate::ring_buf::PytreeRingBuf::new(vec![1024, 2048], 64, 8);
+    let mut ring = PytreeRingBuf::new(vec![1024, 2048], 64, 8);
     ring.pin_host_memory(&roots)
         .expect("registration failed on a GPU host");
 
@@ -294,8 +493,8 @@ fn pinning_twice_in_one_process_reuses_the_resolved_runtime() {
         return;
     }
     let roots = dev_vendor_roots();
-    let mut first = crate::ring_buf::PytreeRingBuf::new(vec![4096], 32, 4);
-    let mut second = crate::ring_buf::PytreeRingBuf::new(vec![4096], 32, 4);
+    let mut first = PytreeRingBuf::new(vec![4096], 32, 4);
+    let mut second = PytreeRingBuf::new(vec![4096], 32, 4);
     first.pin_host_memory(&roots).expect("first ring failed");
     second.pin_host_memory(&roots).expect("second ring failed");
 }

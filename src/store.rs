@@ -70,10 +70,7 @@ impl Store {
     ///
     /// `&mut self` puts this before the store is shared, so a caller that fails
     /// to finish building unregisters by dropping it.
-    pub(crate) fn pin_host_memory(
-        &mut self,
-        cuda_vendor_roots: &[PathBuf],
-    ) -> Result<(), PinError> {
+    pub fn pin_host_memory(&mut self, cuda_vendor_roots: &[PathBuf]) -> Result<(), PinError> {
         self.ring.pin_host_memory(cuda_vendor_roots)
     }
 
