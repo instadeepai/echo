@@ -94,4 +94,5 @@ nav:
       - Ingress & drainers: design/ingress.md
       - Selector: design/selector.md
       - Transport: design/transport.md
+      - Host-memory pinning: design/host-pinning.md
   - Development: development.md

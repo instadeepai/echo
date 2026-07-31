@@ -211,6 +211,9 @@ You should not need a soname symlink in your image or an `LD_LIBRARY_PATH` entry
 If you are carrying either as a workaround, remove it — and note that with them
 in place, rung 3 hides whether rungs 1 and 2 work.
 
+The ladder and why each rung exists are covered in
+[Host-memory pinning](../design/host-pinning.md) under Rust internals.
+
 ## Verifying that pinning engaged
 
 This section is the reason this page exists. Pinning was once believed not to

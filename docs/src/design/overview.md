@@ -56,6 +56,7 @@ client.send(pytree)
 | [`store.rs`](store.md) | Composes the ring buffer, sampler and remover. Does the CAS-reserve-then-memcpy dance. |
 | [`ring_buf.rs`](ring-buffer.md) | Raw pre-allocated buffer with `UnsafeCell` interior mutability; no synchronisation of its own. |
 | [`selector.rs`](selector.md) | `Sampler` and `Remover` traits, plus the FIFO implementation that does the commit-counter wake. |
+| [`host_pinning/`](host-pinning.md) | Optional CUDA page-locking of the ring buffers. Off by default; resolves the runtime by `dlopen`, so no build-time CUDA dependency. |
 | `metrics.rs` | Per-drainer counters + optional hdrhistograms. See [Reading metrics](../guides/metrics.md). |
 | `py_bindings.rs` | PyO3 layer. Constructs the `Store`, picks the transport, releases the GIL during `sample()`. |
 | `array_spec.rs` | Tiny value type: shape + dtype size per leaf. |

@@ -46,32 +46,27 @@ we'd need a scatter-gather variant.
 
 ## Optional host-memory pinning
 
-`pin_host_memory` (see the [guide](../guides/host-memory-pinning.md) for the
-mechanism and the numbers) CUDA-page-locks every backing `Vec<u8>` so a
-downstream host-to-device copy of a sampled view is a DMA transfer rather than a
-chunked staging copy. Two design points are worth recording here.
+`pin_host_memory` CUDA-page-locks every backing `Vec<u8>`, so a host-to-device
+copy of a sampled view is a DMA transfer rather than a chunked staging copy. The
+module that does it is covered in [Host-memory pinning](host-pinning.md); what
+belongs here is why this type can be registered at all.
 
-**It is a separate fallible step, not part of `new`.** `PytreeRingBuf::new` and
-`Store::new` stay infallible; `pin_host_memory(&mut self, ..)` runs on a
-fully-constructed buffer and returns `Result`. The reason is rollback
-correctness, not taste: a constructor that returns `Err` never runs `Drop`, so
-registering inside the constructor would force a hand-written unregister loop on
-the error path. Registering afterwards lets the existing `Drop` own rollback for
-both the failure path and normal teardown. A `pinned` flag says whether `Drop`
-has anything to reverse.
+**The registration is valid for the buffer's whole life** because the buffers are
+allocated once in `new` and never reallocated or resized. That is what makes
+registering each `Vec<u8>` up front sound — page-locking pins the physical pages
+behind specific addresses, so a growable buffer would invalidate its own
+registration on the first reallocation.
 
-Within one attempt, either every buffer ends up registered or none does —
-`pin_all` unregisters what succeeded before returning the error. Registrations
-are still leaked if a reference-counted `Store` outlives process shutdown, which
-is accepted.
+**`Drop` owns the reverse.** `pinned_with: Option<CudaApi>` records the runtime
+the buffers were registered with, and `Drop` unregisters before the `Vec`s are
+freed — `Drop::drop` runs before a struct's fields are dropped, so the memory is
+still valid there. That is also why pinning is a separate step after
+construction rather than part of `new`: a constructor returning `Err` never runs
+`Drop`, so registering inside one would need a hand-written unregister loop on the
+error path.
 
-**The registration is valid for the buffer's life** because the buffers are
-allocated once in `new` and never reallocated or resized. That property is what
-makes registering the whole `Vec<u8>` up front sound; a growable buffer would
-invalidate the registration on its first reallocation.
-
-The buffers are page-*un*aligned in practice (glibc returns large allocations at
-a small offset into a page). Measurement showed aligning them buys ~1.6% of copy
+The buffers are page-*un*aligned in practice (glibc returns large allocations at a
+small offset into a page). Measurement showed aligning them buys ~1.6% of copy
 time and nothing at all on host-thread occupancy, so `Vec<u8>` stays.
 
 ## What this type does not do
