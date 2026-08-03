@@ -2,8 +2,8 @@
 
 `src/host_pinning/` optionally CUDA-page-locks the ring buffers, so a
 host-to-device copy of a sampled batch is a DMA transfer rather than a chunked
-staging copy. For the mechanism, the measured numbers and how to check it
-engaged, see the [host-memory pinning guide](../guides/host-memory-pinning.md).
+staging copy. For the mechanism and the user-facing contract, see the
+[host-memory pinning guide](../guides/host-memory-pinning.md).
 
 | File | Role |
 |---|---|

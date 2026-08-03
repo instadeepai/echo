@@ -86,8 +86,9 @@ For a batch of 512 with `num_buffers=3` and 67 KB per sample, that is
   process means N times the figure above, so size the host accordingly.
 
 Note that `VmLck` in `/proc/self/status` stays at **zero** even when pinning is
-working, so a memory-lock resource limit (`ulimit -l`) does not bind here — see
-[below](#verifying-that-pinning-engaged).
+working — the driver's page-locking does not go through mlock accounting. So a
+memory-lock limit (`ulimit -l`) does not bind here, and `VmLck` is not a way to
+check that pinning engaged.
 
 ## Construct the server after CUDA is initialised
 

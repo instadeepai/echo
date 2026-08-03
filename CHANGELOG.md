@@ -21,8 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   libraries, then the installed CUDA wheels, then sonames (versioned before
   unversioned) — so no soname symlink or `LD_LIBRARY_PATH` entry is needed.
 - New guide: [Host-memory pinning](https://instadeepai.github.io/echo/guides/host-memory-pinning/),
-  covering the mechanism, the measured numbers, the unswappable footprint
-  arithmetic, and how to verify pinning engaged (and why `VmLck` cannot).
+  covering the mechanism, the constructor guarantee, the unswappable footprint
+  arithmetic, and how the CUDA runtime is located.
 
 ## [0.1.1] - 2026-05-26
 
