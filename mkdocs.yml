@@ -80,6 +80,7 @@ nav:
       - TrajectoryAccumulator: guides/trajectory-accumulator.md
       - In-process use: guides/in-process.md
       - Reading metrics: guides/metrics.md
+      - Host-memory pinning: guides/host-memory-pinning.md
   - Python API:
       - Server: api/server.md
       - Clients: api/clients.md
@@ -93,4 +94,5 @@ nav:
       - Ingress & drainers: design/ingress.md
       - Selector: design/selector.md
       - Transport: design/transport.md
+      - Host-memory pinning: design/host-pinning.md
   - Development: development.md

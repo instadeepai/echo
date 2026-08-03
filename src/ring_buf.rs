@@ -11,6 +11,9 @@
 //! coordination.
 
 use std::cell::UnsafeCell;
+use std::path::PathBuf;
+
+use crate::host_pinning::{self, CudaApi, PinError, Region};
 
 pub struct PytreeRingBuf {
     /// One contiguous buffer per array in the flattened pytree.
@@ -19,6 +22,9 @@ pub struct PytreeRingBuf {
     slot_bytes: Vec<usize>,
     /// Total number of slots.
     capacity: usize,
+    /// The runtime the buffers are registered with, once they are. `Some` is
+    /// `Drop`'s cue to unregister, and holding it here keeps `Drop` off a global.
+    pinned_with: Option<CudaApi>,
 }
 
 impl PytreeRingBuf {
@@ -34,7 +40,7 @@ impl PytreeRingBuf {
         );
         assert!(!slot_bytes.is_empty(), "slot_bytes must not be empty");
 
-        let buffers = slot_bytes
+        let buffers: Vec<UnsafeCell<Vec<u8>>> = slot_bytes
             .iter()
             .map(|&bytes| UnsafeCell::new(vec![0u8; bytes * capacity]))
             .collect();
@@ -43,7 +49,47 @@ impl PytreeRingBuf {
             buffers,
             slot_bytes,
             capacity,
+            pinned_with: None,
         }
+    }
+
+    /// Page-lock every buffer, so a host-to-device copy of a sampled view is a
+    /// DMA transfer rather than a chunked staging copy. All or nothing: a partial
+    /// failure is rolled back before the error returns.
+    ///
+    /// Separate from `new` because a constructor returning `Err` never runs
+    /// `Drop`, so registering there would need a hand-written unregister loop on
+    /// the error path. Here `Drop` owns rollback and teardown alike.
+    ///
+    /// The buffers are contiguous and never reallocated, so a registration stays
+    /// valid for the buffer's whole life. `cuda_vendor_roots` comes from Python's
+    /// import machinery; see [`crate::host_pinning`].
+    pub fn pin_host_memory(&mut self, cuda_vendor_roots: &[PathBuf]) -> Result<(), PinError> {
+        self.pin_with(*host_pinning::api(cuda_vendor_roots)?)
+    }
+
+    /// [`Self::pin_host_memory`] against an already-resolved runtime. Split out
+    /// so tests can drive registration and teardown with stubs, without a GPU.
+    pub fn pin_with(&mut self, api: CudaApi) -> Result<(), PinError> {
+        // SAFETY: the regions are `self`'s own allocations, never reallocated,
+        // and `Drop` unregisters them before they are freed.
+        unsafe { host_pinning::pin_all(&api, &self.regions())? };
+        self.pinned_with = Some(api);
+        Ok(())
+    }
+
+    /// Each backing buffer as a (pointer, length) pair for the CUDA runtime.
+    fn regions(&self) -> Vec<Region> {
+        self.buffers
+            .iter()
+            .map(|cell| {
+                let buf = unsafe { &*cell.get() };
+                Region {
+                    ptr: buf.as_ptr() as *mut u8,
+                    len: buf.len(),
+                }
+            })
+            .collect()
     }
 
     pub fn capacity(&self) -> usize {
@@ -117,3 +163,16 @@ unsafe impl Sync for PytreeRingBuf {}
 
 // Safety: All data is heap-allocated and owned; transfer between threads is safe.
 unsafe impl Send for PytreeRingBuf {}
+
+impl Drop for PytreeRingBuf {
+    fn drop(&mut self) {
+        let Some(api) = self.pinned_with else {
+            return;
+        };
+        // Drop::drop runs before the fields are dropped, so the memory is still
+        // valid here.
+        // SAFETY: `pinned_with` is Some only after `pin_with` registered exactly
+        // these regions through this same api.
+        unsafe { host_pinning::unpin_all(&api, &self.regions()) };
+    }
+}

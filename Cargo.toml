@@ -1,6 +1,6 @@
 [package]
 name = "echo"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "A fast distributed replay buffer for reinforcement learning."
 license = "Apache-2.0"
@@ -38,5 +38,6 @@ detailed-metrics = ["dep:hdrhistogram"]
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3"
 tokio-test = "0.4"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

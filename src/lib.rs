@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 
 pub mod array_spec;
+pub mod host_pinning;
 pub mod ingress;
 pub mod metrics;
 mod py_bindings;

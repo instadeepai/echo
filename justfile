@@ -31,9 +31,13 @@ install-telemetry-from-git BRANCH="main":
 develop:
     uv run maturin develop --features detailed-metrics
 
-# Live-reload docs on http://127.0.0.1:8000
+# Live-reload docs on http://127.0.0.1:8000/echo/
 docs-serve:
     uv run --extra docs mkdocs serve
+
+# Live-reload docs bound so another machine can reach them (pass an interface to narrow it)
+docs-serve-on ADDR="0.0.0.0:8000":
+    uv run --extra docs mkdocs serve -a {{ADDR}}
 
 # Build static docs into site/
 docs:

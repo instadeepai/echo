@@ -44,6 +44,7 @@ pytree-agnostic.
 - GIL released while waiting for batches
 - FIFO sampling (with more strategies planned)
 - Detailed metrics exposed per batch
+- Optional CUDA [host-memory pinning](https://instadeepai.github.io/echo/guides/host-memory-pinning/) so H2D copies are real DMA transfers, not driver-staged
 
 ## Example
 

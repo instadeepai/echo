@@ -28,6 +28,12 @@ class Server:
         num_buffers: Number of ring buffer batches (min 2, default 3)
         num_drainers: Number of threads draining from producer queues
         producer_queue_size: Per-connection queue size
+        pin_host_memory: CUDA-page-lock the ring buffers, so a downstream H2D
+            copy is a real DMA transfer instead of a staging copy.
+
+    Raises:
+        RuntimeError: If ``pin_host_memory`` is set and the buffers could not
+            be page-locked.
 
     Lifetime: the numpy arrays returned by ``sample()`` are views into
     Rust-owned ring-buffer memory. They are invalidated as soon as the next
@@ -45,6 +51,7 @@ class Server:
         num_buffers: int = 3,
         num_drainers: int = 8,
         producer_queue_size: int = 8,
+        pin_host_memory: bool = False,
     ):
         leaves, self._treedef = optree.tree_flatten(example)
 
@@ -64,6 +71,7 @@ class Server:
             num_buffers=num_buffers,
             num_drainers=num_drainers,
             producer_queue_size=producer_queue_size,
+            pin_host_memory=pin_host_memory,
         )
 
     def start(self) -> None:

@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 #[cfg(feature = "detailed-metrics")]
 use std::time::Instant;
@@ -7,6 +8,7 @@ use crossbeam_utils::CachePadded;
 use tokio::sync::Notify;
 
 use crate::array_spec::ArraySpec;
+use crate::host_pinning::PinError;
 use crate::metrics::DrainerMetrics;
 use crate::ring_buf::PytreeRingBuf;
 use crate::selector::{Remover, SampleResult, Sampler};
@@ -62,6 +64,14 @@ impl Store {
             shutdown: AtomicBool::new(false),
             has_previous_batch: Cell::new(false),
         }
+    }
+
+    /// Page-lock the ring buffers; see [`PytreeRingBuf::pin_host_memory`].
+    ///
+    /// `&mut self` puts this before the store is shared, so a caller that fails
+    /// to finish building unregisters by dropping it.
+    pub fn pin_host_memory(&mut self, cuda_vendor_roots: &[PathBuf]) -> Result<(), PinError> {
+        self.ring.pin_host_memory(cuda_vendor_roots)
     }
 
     pub fn batch_size(&self) -> usize {

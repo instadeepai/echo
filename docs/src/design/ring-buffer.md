@@ -44,6 +44,28 @@ ever spans the wrap-around point. That property is what lets the
 `Contiguous { start, count }` sample result type exist at all; without it
 we'd need a scatter-gather variant.
 
+## Optional host-memory pinning
+
+`pin_host_memory` CUDA-page-locks every backing `Vec<u8>`, so a host-to-device
+copy of a sampled view is a DMA transfer rather than a chunked staging copy. The
+module that does it is covered in [Host-memory pinning](host-pinning.md).
+
+What matters here is that the registration stays valid for the buffer's whole
+life: the buffers are allocated once in `new` and never reallocated or resized.
+Page-locking pins the physical pages behind specific addresses, so a growable
+buffer would invalidate its own registration on the first reallocation.
+
+`Drop` owns the reverse. `pinned_with: Option<CudaApi>` records the runtime the
+buffers were registered with, and `Drop` unregisters before the `Vec`s are freed —
+`Drop::drop` runs before a struct's fields are dropped, so the memory is still
+valid there. It is also why pinning is a separate step after construction rather
+than part of `new`; see
+[Why registration is not in the constructor](host-pinning.md#why-registration-is-not-in-the-constructor).
+
+The buffers are page-*un*aligned in practice (glibc returns large allocations at a
+small offset into a page). Measurement showed aligning them buys ~1.6% of copy
+time and nothing on host-thread occupancy, so `Vec<u8>` stays.
+
 ## What this type does not do
 
 - Track which slots are in use (the `Store` does that via the write/read
