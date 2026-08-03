@@ -9,32 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `Server(..., pin_host_memory=False)` CUDA-page-locks the ring buffers, so a
+- `Server(..., pin_host_memory=True)` CUDA-page-locks the ring buffers, so a
   downstream host-to-device copy of a sampled batch is a real DMA transfer on the
-  copy engine instead of a chunked, driver-mediated staging copy. Measured
-  locally, `cudaMemcpyAsync` out of pageable memory holds the calling thread for
-  97% of the copy; out of page-locked memory it returns in 0.002 ms.
+  copy engine instead of a chunked, driver-mediated staging copy. Off by default.
+  Measured locally, `cudaMemcpyAsync` out of pageable memory holds the calling
+  thread for 97% of the copy; out of page-locked memory it returns in 0.002 ms.
 - If the constructor returns, every ring buffer is page-locked. Any inability to
   deliver that raises `RuntimeError` naming every path probed for the CUDA
-  runtime and the CUDA error symbolically — there is no silent no-op, so a
-  throughput measurement can't be invalidated by the feature having done nothing.
+  runtime and the CUDA error symbolically. There is no silent no-op.
+- The CUDA runtime is resolved through a three-rung ladder — already-mapped
+  libraries, then the installed CUDA wheels, then sonames (versioned before
+  unversioned) — so no soname symlink or `LD_LIBRARY_PATH` entry is needed.
 - New guide: [Host-memory pinning](https://instadeepai.github.io/echo/guides/host-memory-pinning/),
   covering the mechanism, the measured numbers, the unswappable footprint
   arithmetic, and how to verify pinning engaged (and why `VmLck` cannot).
-
-### Changed
-
-- The CUDA runtime is now resolved through a three-rung ladder — already-mapped
-  libraries, then the installed CUDA wheels, then sonames (versioned before
-  unversioned). A soname symlink or `LD_LIBRARY_PATH` entry is no longer needed.
-
-### Removed
-
-- `ECHO_PIN_HOST_MEMORY`. Pinning is controlled only by the `pin_host_memory`
-  keyword argument, so the two can never disagree. Nothing released ever
-  responded to this variable — and it never worked: it opened the unversioned
-  `libcudart.so` soname, which the pip CUDA runtime wheels do not ship, so every
-  pin call was silently a no-op.
 
 ## [0.1.1] - 2026-05-26
 

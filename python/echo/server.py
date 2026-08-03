@@ -37,8 +37,7 @@ class Server:
             Anything that would prevent that — no CUDA runtime found, no usable
             device, a registration rejected — raises ``RuntimeError`` here,
             naming every path probed and the CUDA error. There is no silent
-            fallback, so a throughput measurement can never be invalidated by
-            pinning having quietly done nothing.
+            fallback.
 
             Construct the server *after* your framework has initialised CUDA.
             The page-locked footprint is the full ring

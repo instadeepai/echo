@@ -1,13 +1,10 @@
 # Host-memory pinning
 
-`Server(..., pin_host_memory=True)` CUDA-page-locks echo's ring buffers, so
-that copying a sampled batch to a GPU is a real DMA transfer instead of a
-chunked copy the driver walks through by hand.
+`Server(..., pin_host_memory=True)` CUDA-page-locks echo's ring buffers, so that
+copying a sampled batch to a GPU is a real DMA transfer instead of a chunked copy
+the driver walks through by hand.
 
-It is off by default and it is not free — the page-locked memory is not
-swappable. This page covers what the mechanism actually is, what it measured,
-how to size the footprint, and — the part that is easy to get wrong — **how to
-confirm it engaged**.
+It is off by default, and it is not free: page-locked memory is not swappable.
 
 ```python
 server = Server(example, batch_size=512, transport=TcpTransport(port=50051),
@@ -25,6 +22,8 @@ path echo probed and the CUDA error symbolically:
 
 ```text
 RuntimeError: pin_host_memory=True but no CUDA runtime could be loaded. Probed, in order:
+  - (none) [already-loaded scan]: this process has no CUDA runtime mapped
+  - (none) [installed-wheel search]: no CUDA vendor package is importable
   - libcudart.so.13 [soname load]: libcudart.so.13: cannot open shared object file: No such file or directory
   - libcudart.so.12 [soname load]: libcudart.so.12: cannot open shared object file: No such file or directory
   - libcudart.so [soname load]: libcudart.so: cannot open shared object file: No such file or directory
@@ -32,15 +31,16 @@ Install a CUDA runtime (for example the nvidia-cuda-runtime wheel), or construct
 the Server after your framework has initialised CUDA.
 ```
 
-That is deliberately all the API there is: no status object, no report method, no
-warning. Construction succeeding *is* the assertion, and unlike an explicit check
-you might add, it cannot be forgotten. If you would rather degrade than fail,
-catch `RuntimeError`.
+A `(none)` line means that rung ran and found nothing, so the message
+distinguishes it from a rung that never ran at all.
+
+That is all the API there is: no status object, no report method, no warning. If
+you would rather degrade than fail, catch `RuntimeError`.
 
 With the argument off, echo loads no CUDA library at all and behaves exactly like
 a build without the feature.
 
-## The mechanism: a pageable "async" copy is not async
+## Why a pageable "async" copy is not async
 
 Ordinary heap memory is *pageable* — the OS may move or swap it out, so the GPU
 cannot safely DMA out of it. When you copy from pageable memory, the driver
@@ -50,16 +50,15 @@ cannot hand the transfer to the copy engine and walk away. Instead it:
 2. DMAs that chunk to the device,
 3. repeats, thousands of times for a large batch.
 
-Steps 1–3 run on the calling CPU thread and hold the driver lock. Two things
-follow, and the second is usually the expensive one:
+Steps 1–3 run on the calling CPU thread and hold the driver lock, with two
+consequences:
 
 - the bytes move slower, because every chunk pays a round-trip;
 - **`cudaMemcpyAsync` stops being asynchronous.** The call does not return until
   the staging loop is essentially done, and while it runs, the driver lock it
   holds blocks the *same thread's* kernel launches. On a learner issuing tens of
-  thousands of small launches per step, that contention — not the bandwidth —
-  is what shows up as host-side dispatch dominating the step while the GPU sits
-  idle waiting for work.
+  thousands of small launches per step, that contention — not the bandwidth — is
+  what shows up as host-side dispatch dominating the step while the GPU sits idle.
 
 Page-locking the ring buffers removes the staging loop. The pages cannot move, so
 the driver writes one DMA descriptor to the copy engine and returns immediately.
@@ -72,11 +71,11 @@ allocates device memory.
 
 ## Measured
 
-Local microbenchmark on a **NVIDIA GeForce RTX 5060 Ti (16 GB), driver
+Local microbenchmark on an **NVIDIA GeForce RTX 5060 Ti (16 GB), driver
 595.71.05, CUDA runtime 13.3**, sized like a large-batch learner:
 `batch_size=512` over four arrays (34.1 MB per batch, 102.2 MB ring), with the
 copy measurement isolated to a single 52.4 MB buffer. 11 repeats; median and
-interquartile range:
+interquartile range.
 
 Through echo's own ring buffers and sampled views (34.1 MB batch, 102.2 MB ring):
 
@@ -94,49 +93,47 @@ memory and to time the copy call on its own:
 | page-locked | 3.715 ms | 3.714–3.719 | 14.1 GB/s | 0.002 ms — **0%** |
 | `cudaHostAlloc` (reference ceiling) | 3.658 ms | 3.657–3.658 | 14.3 GB/s | 0.002 ms |
 
-Read the throughput and the return-latency columns separately, because they say
-different things.
+The throughput and return-latency columns say different things, so read them
+separately.
 
-**Bandwidth barely moves on this machine, and that is expected.** Both paths
-saturate the host's link at ~14 GB/s; driver-allocated pinned memory only reaches
+Bandwidth barely moves on this machine, and that is expected. Both paths saturate
+the host's link at ~14 GB/s, and driver-allocated pinned memory only reaches
 14.3 GB/s, so there is nothing more to win here. A host with more PCIe headroom
 will show a larger gap.
 
-**Host-thread occupancy collapses by ~1800x.** That is the mechanism above,
-measured: the same call goes from holding the calling thread for 3.645 ms to
-0.002 ms. This is the component that scales into the driver-lock contention a
+Host-thread occupancy drops by three orders of magnitude: the same call goes from
+holding the calling thread for 3.645 ms to 0.002 ms. That is the mechanism above,
+measured. It is the component that scales into the driver-lock contention a
 large-batch learner suffers, and it is the reason to turn pinning on.
 
-**Nothing on the write side pays for it.** Host-write throughput into the ring —
-what a drainer costs — is unchanged at 12.3 GB/s, and registering the 102 MB ring
-took 8.9 ms once, at construction. Pinning changes only how the memory is mapped,
-not any code on the ingest or sample path, so there is no per-sample or per-drain
+Nothing on the write side pays for it. Host-write throughput into the ring — what
+a drainer costs — is unchanged at 12.3 GB/s, and registering the 102 MB ring took
+8.9 ms once, at construction. Pinning changes only how the memory is mapped, not
+any code on the ingest or sample path, so there is no per-sample or per-drain
 cost. A batch sampled with pinning on is bit-identical to the same batch with it
 off.
 
-**Only the portable flag is used.** Two variants were measured and rejected.
+Only the portable flag is used; two other variants were measured and rejected.
 Page-aligning the ring buffers gained 1.6% of copy time and nothing at all on
 return latency, well under the bar set in advance, so the buffers stay plain
-`Vec<u8>`. Read-only registration (`cudaHostRegisterReadOnly`) is not usable
-here at all — `cudaHostRegister` returns `cudaErrorNotSupported` on this GPU,
-whose `cudaDevAttrHostRegisterReadOnlySupported` is 0 — and the CUDA
-documentation describes that flag as permission to register memory *mapped*
-read-only rather than as a transfer optimisation, while saying nothing about host
-writes to such a range. Echo's drainers write these pages continuously, so there
-would be no documented basis for using it even where it is supported.
+`Vec<u8>`. Read-only registration (`cudaHostRegisterReadOnly`) is not usable here
+at all — `cudaHostRegister` returns `cudaErrorNotSupported` on this GPU, whose
+`cudaDevAttrHostRegisterReadOnlySupported` is 0 — and the CUDA documentation
+describes that flag as permission to register memory *mapped* read-only rather
+than as a transfer optimisation, while saying nothing about host writes to such a
+range. Echo's drainers write these pages continuously, so there would be no
+documented basis for using it even where it is supported.
 
 **What this microbenchmark cannot tell you.** A single consumer GPU cannot
 reproduce the driver-lock contention of a real learner issuing tens of thousands
-of small kernel launches concurrently with the staging copy. The table above
-measures the bandwidth component and the mechanism; it does *not* size the win on
-a large-batch learner, where the contention component dominates and the effect is
-correspondingly larger than the 1–3% bandwidth figure here.
+of small kernel launches concurrently with the staging copy. The tables above
+measure the bandwidth component and the mechanism; they do not size the win on a
+large-batch learner, where the contention component dominates. So the 1–3% figure
+is not a prediction of what pinning is worth, and neither is the occupancy column.
+Measure your own workload: turn pinning on, confirm it engaged (below), and
+compare step times.
 
-So do not read 1–3% as "pinning is worth 1–3%", and do not read the occupancy
-column as a step-time prediction either. Measure your own workload: turn pinning
-on, confirm it engaged (below), and compare step times.
-
-To reproduce the table: allocate a buffer with `malloc`, `cudaMalloc` a
+To reproduce the tables: allocate a buffer with `malloc`, `cudaMalloc` a
 destination, and time `cudaMemcpyAsync` + `cudaStreamSynchronize` before and
 after `cudaHostRegister(ptr, size, cudaHostRegisterPortable)`. Time the
 `cudaMemcpyAsync` call *on its own*, without the synchronize, to see the
@@ -153,13 +150,10 @@ page-locked bytes = batch_size x num_buffers x sum(leaf.nbytes for leaf in examp
 For a batch of 512 with `num_buffers=3` and 67 KB per sample, that is
 512 x 3 x 67 KB ≈ 102 MB.
 
-Two things to hold onto:
-
 - **It is not swappable.** Those pages are removed from the pool the kernel can
   reclaim under pressure, for the whole life of the server.
 - **It multiplies by the number of servers.** One `Server` per GPU in a single
-  process means N times the figure above. Size the host before the job does it
-  for you.
+  process means N times the figure above, so size the host accordingly.
 
 Note that `VmLck` in `/proc/self/status` stays at **zero** even when pinning is
 working, so a memory-lock resource limit (`ulimit -l`) does not bind here — see
@@ -177,14 +171,14 @@ initialisation best-effort, by freeing a null pointer. That frees nothing and
 never *changes* which device is current, so it cannot perturb your framework's
 device selection.
 
-It is not entirely free, though, and this is the reason the ordering above is a
-recommendation rather than a footnote: initialising the runtime creates the
-primary CUDA context on whatever device is already current, and that context
-costs device memory (~128 MB on the machine in the table above). Construct after
-your framework has initialised CUDA and the context already exists, so echo adds
-nothing. Construct before it, and echo creates the context first — which both
-spends that memory early and may interact badly with a framework that
-pre-allocates a fraction of *free* device memory.
+It is not entirely free, though, which is why the ordering above is worth
+following: initialising the runtime creates the primary CUDA context on whatever
+device is already current, and that context costs device memory (~128 MB on the
+machine in the tables above). Construct after your framework has initialised CUDA
+and the context already exists, so echo adds nothing. Construct before it, and
+echo creates the context first — which both spends that memory early and may
+interact badly with a framework that pre-allocates a fraction of *free* device
+memory.
 
 Echo never allocates device buffers of its own and never calls a
 set-device function.
@@ -216,9 +210,9 @@ The ladder and why each rung exists are covered in
 
 ## Verifying that pinning engaged
 
-This section is the reason this page exists. Pinning was once believed not to
-help a workload that had in fact never executed the pinning code path, and the
-knowledge of how to check lived in one person's head.
+Pinning has been judged unhelpful before on a workload that turned out never to
+have executed the pinning code path at all. Confirm it engaged before drawing any
+conclusion from a measurement.
 
 **In-process: the constructor.** `Server(..., pin_host_memory=True)` returning
 *is* the assertion. There is nothing else to query.
@@ -229,8 +223,8 @@ for each transfer; it must say the source is pinned/page-locked rather than
 pageable. This is the authoritative external signal.
 
 **From a test, without a framework.** Ask the CUDA runtime directly for the flags
-on the address behind a sampled batch — this is what echo's own test suite does,
-precisely so that a test cannot pass merely because echo believes it worked:
+on the address behind a sampled batch. This is what echo's own test suite does, so
+that a test cannot pass merely because echo believes it worked:
 
 ```python
 import ctypes
@@ -244,13 +238,18 @@ assert code == 0                # 0 = cudaSuccess; non-zero means not registered
 assert flags.value & 0x01       # cudaHostRegisterPortable
 ```
 
+`CDLL` here goes through the system loader, which is exactly what a wheel-only
+install does not satisfy, so pass the absolute path of the runtime if the soname
+does not resolve. `python/tests/test_host_pinning.py` walks the same candidates
+echo does.
+
 !!! warning "`VmLck` is not a valid check"
 
     `VmLck` in `/proc/self/status` stays at **zero** even when pinning
     demonstrably works: the NVIDIA driver's page-locking does not go through
-    mlock accounting. Anyone who reads it as a check will conclude pinning is off
-    when it is on. The same goes for any tool built on mlock accounting. Use the
-    profile trace or `cudaHostGetFlags`.
+    mlock accounting. Read as a check, it reports pinning as off when it is on,
+    and so does any tool built on mlock accounting. Use the profile trace or
+    `cudaHostGetFlags`.
 
 ## What is not covered
 

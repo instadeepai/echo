@@ -45,8 +45,8 @@ uv pip install nvidia-cuda-runtime      # CUDA 13; use nvidia-cuda-runtime-cu12 
 ```
 
 Without it only rung 1 (already-mapped libraries) can hit, and on a machine with no
-system CUDA install nothing resolves at all. The wheel is deliberately *not* a
-`dev` extra: CI is CPU-only and should not download a CUDA runtime. Note that
+system CUDA install nothing resolves at all. The wheel is *not* a `dev` extra:
+CI is CPU-only and should not download a CUDA runtime. Note that
 `uv run` re-syncs the venv, so re-run the install if it disappears.
 
 `cargo test` has no Python interpreter to ask for the wheel's location, so the

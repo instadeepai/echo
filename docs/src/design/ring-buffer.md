@@ -48,26 +48,23 @@ we'd need a scatter-gather variant.
 
 `pin_host_memory` CUDA-page-locks every backing `Vec<u8>`, so a host-to-device
 copy of a sampled view is a DMA transfer rather than a chunked staging copy. The
-module that does it is covered in [Host-memory pinning](host-pinning.md); what
-belongs here is why this type can be registered at all.
+module that does it is covered in [Host-memory pinning](host-pinning.md).
 
-**The registration is valid for the buffer's whole life** because the buffers are
-allocated once in `new` and never reallocated or resized. That is what makes
-registering each `Vec<u8>` up front sound — page-locking pins the physical pages
-behind specific addresses, so a growable buffer would invalidate its own
-registration on the first reallocation.
+What matters here is that the registration stays valid for the buffer's whole
+life: the buffers are allocated once in `new` and never reallocated or resized.
+Page-locking pins the physical pages behind specific addresses, so a growable
+buffer would invalidate its own registration on the first reallocation.
 
-**`Drop` owns the reverse.** `pinned_with: Option<CudaApi>` records the runtime
-the buffers were registered with, and `Drop` unregisters before the `Vec`s are
-freed — `Drop::drop` runs before a struct's fields are dropped, so the memory is
-still valid there. That is also why pinning is a separate step after
-construction rather than part of `new`: a constructor returning `Err` never runs
-`Drop`, so registering inside one would need a hand-written unregister loop on the
-error path.
+`Drop` owns the reverse. `pinned_with: Option<CudaApi>` records the runtime the
+buffers were registered with, and `Drop` unregisters before the `Vec`s are freed —
+`Drop::drop` runs before a struct's fields are dropped, so the memory is still
+valid there. It is also why pinning is a separate step after construction rather
+than part of `new`; see
+[Why registration is not in the constructor](host-pinning.md#why-registration-is-not-in-the-constructor).
 
 The buffers are page-*un*aligned in practice (glibc returns large allocations at a
 small offset into a page). Measurement showed aligning them buys ~1.6% of copy
-time and nothing at all on host-thread occupancy, so `Vec<u8>` stays.
+time and nothing on host-thread occupancy, so `Vec<u8>` stays.
 
 ## What this type does not do
 

@@ -26,8 +26,8 @@ pub unsafe fn pin_all(api: &CudaApi, regions: &[Region]) -> Result<(), PinError>
     // Registration against an uninitialised runtime fails, so force init.
     // Freeing null frees nothing and never changes the current device, but it is
     // not free: it creates the primary context on the current device, costing
-    // that context's memory (~100 MB). Constructing after the framework has
-    // initialised CUDA — the documented order — means it already exists.
+    // that context's memory (~128 MB measured). Constructing after the framework
+    // has initialised CUDA — the documented order — means it already exists.
     //
     // The result is ignored: portable registration makes the device irrelevant,
     // so the only failure worth reporting is registration's own, below.
