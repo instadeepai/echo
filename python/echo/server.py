@@ -29,8 +29,7 @@ class Server:
         num_drainers: Number of threads draining from producer queues
         producer_queue_size: Per-connection queue size
         pin_host_memory: CUDA-page-lock the ring buffers, so a downstream H2D
-            copy is a real DMA transfer on the copy engine instead of a staging
-            copy.
+            copy is a real DMA transfer instead of a staging copy.
 
     Raises:
         RuntimeError: If ``pin_host_memory`` is set and the buffers could not
