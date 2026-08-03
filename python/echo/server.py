@@ -28,23 +28,8 @@ class Server:
         num_buffers: Number of ring buffer batches (min 2, default 3)
         num_drainers: Number of threads draining from producer queues
         producer_queue_size: Per-connection queue size
-        pin_host_memory: CUDA-page-lock the ring buffers, so a downstream
-            host-to-device copy of a sampled batch is a real DMA transfer on
-            the copy engine instead of a chunked, driver-mediated staging copy.
-            Off by default.
-
-            **If this constructor returns, every ring buffer is page-locked.**
-            Anything that would prevent that — no CUDA runtime found, no usable
-            device, a registration rejected — raises ``RuntimeError`` here,
-            naming every path probed and the CUDA error. There is no silent
-            fallback.
-
-            Construct the server *after* your framework has initialised CUDA.
-            The page-locked footprint is the full ring
-            (``batch_size * num_buffers * bytes_per_sample``), is not
-            swappable, and multiplies by the number of servers in the process.
-            See the [host-memory pinning guide](../guides/host-memory-pinning.md).
-
+        pin_host_memory: CUDA-page-lock the ring buffers, so a downstream H2D
+            is a real DMA transfer on the copy engine instead of a staging copy.
     Raises:
         RuntimeError: If ``pin_host_memory`` is set and the buffers could not
             be page-locked.

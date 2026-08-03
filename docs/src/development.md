@@ -31,23 +31,18 @@ See [Host-memory pinning](design/host-pinning.md) for how the module is laid out
 and the [guide](guides/host-memory-pinning.md) for what it does for a user.
 
 Most of `tests/host_pinning.rs` needs no GPU: the resolution ladder is pure, and
-registration and rollback run against injected stubs. The tests that do need a
-device print a skip notice and pass when there isn't one, since Rust has no native
-test skip. On the Python side the equivalent tests carry a `gpu` marker (registered
-in `pyproject.toml`) and `pytest` skips them automatically. Either way CI needs no
-per-runner configuration.
+registration and rollback run against injected stubs.
 
 To exercise the CUDA-runtime resolution ladder locally, install a runtime wheel
 into the checkout's venv:
 
 ```bash
-uv pip install nvidia-cuda-runtime      # CUDA 13; use nvidia-cuda-runtime-cu12 for CUDA 12
+uv pip install nvidia-cuda-runtime
 ```
 
 Without it only rung 1 (already-mapped libraries) can hit, and on a machine with no
 system CUDA install nothing resolves at all. The wheel is *not* a `dev` extra:
-CI is CPU-only and should not download a CUDA runtime. Note that
-`uv run` re-syncs the venv, so re-run the install if it disappears.
+CI is CPU-only and should not download a CUDA runtime.
 
 `cargo test` has no Python interpreter to ask for the wheel's location, so the
 Rust tests look under `.venv/lib/python*/site-packages/nvidia` in the checkout.
