@@ -143,8 +143,15 @@ impl PyServer {
         // registered. Anything short of that raises, so a workload can never be
         // measured against a pinning path that silently did nothing.
         if pin_host_memory {
-            store
-                .pin_host_memory(&cuda_vendor_roots(py))
+            // Locating the vendor roots needs the GIL; page-locking does not, and
+            // it can take a while — a cold `cudaFree(NULL)` creates the primary
+            // context (~210 ms measured) when the framework has not initialised
+            // CUDA yet. `detach` is still synchronous: it releases the GIL, runs
+            // on this thread, and reacquires before returning, so the guarantee
+            // above holds. Holding the GIL across a CUDA call would also let echo
+            // deadlock against a thread that holds a CUDA lock and wants the GIL.
+            let roots = cuda_vendor_roots(py);
+            py.detach(|| store.pin_host_memory(&roots))
                 .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
         }
         let store = Arc::new(store);

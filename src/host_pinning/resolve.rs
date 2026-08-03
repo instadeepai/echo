@@ -95,6 +95,9 @@ pub fn search_wheel_roots(roots: &[PathBuf]) -> Vec<String> {
         };
         for entry in entries.flatten() {
             let path = entry.path();
+            // `DirEntry::file_type` does not follow symlinks, so a symlinked
+            // directory is not descended into. Wheels do not put libraries behind
+            // directory symlinks, and it keeps the walk safe from link loops.
             let Ok(file_type) = entry.file_type() else {
                 continue;
             };
@@ -272,6 +275,9 @@ fn empty_rung_note(rung: Rung, vendor_roots: &[PathBuf]) -> String {
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
+        // Unreachable: SONAMES is a non-empty const, and the dedup in
+        // `candidates` only ever compares absolute paths against bare sonames.
+        // Kept for exhaustiveness rather than panicking inside error reporting.
         Rung::Soname => "no soname candidates".to_string(),
     };
     format!("(none) [{}]: {detail}", rung.label())

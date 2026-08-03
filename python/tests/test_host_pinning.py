@@ -30,6 +30,9 @@ from echo import Server
 CUDA_SUCCESS = 0
 CUDA_HOST_REGISTER_PORTABLE = 0x01
 
+# Rung 3 of echo's ladder, in the order echo tries them.
+SONAMES = ("libcudart.so.13", "libcudart.so.12", "libcudart.so")
+
 EXAMPLE = {
     "obs": np.zeros((16,), dtype=np.float32),
     "reward": np.zeros((1,), dtype=np.float32),
@@ -47,7 +50,7 @@ def _cudart_paths() -> list[str]:
         candidates += re.findall(r"\s(/\S*libcudart\.so[.\d]*)", maps.read())
     for site in sys.path:
         candidates += glob.glob(os.path.join(site, "nvidia", "*", "lib", "libcudart.so*"))
-    candidates += ["libcudart.so.13", "libcudart.so.12", "libcudart.so"]
+    candidates += list(SONAMES)
     return [c for c in candidates if not c.endswith(".a")]
 
 
@@ -140,17 +143,80 @@ class TestDefaultOff:
         assert "ok" in result.stdout
 
 
-@pytest.mark.skipif(HAS_GPU, reason="a usable CUDA device is present")
-def test_requesting_pinning_without_cuda_raises_and_lists_probed_paths():
-    """The failure a misconfigured deployment gets: loud, at startup, specific."""
-    with pytest.raises(RuntimeError) as excinfo:
-        Server(EXAMPLE, batch_size=4, pin_host_memory=True)
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="needs procfs")
+def test_total_resolution_failure_names_every_rung_in_order():
+    """The failure a misconfigured deployment gets: loud, at startup, specific.
 
-    message = str(excinfo.value)
-    assert "libcudart.so" in message, message
-    # Every rung reports what it tried, so the user can fix their environment
-    # without reading echo's source.
-    assert "soname load" in message, message
+    The message is the entire interface to a resolution failure, so it is checked
+    against a real one rather than a hand-built error. Forced in a subprocess with
+    every rung disabled: nothing mapped, ``nvidia`` unimportable, no loader path.
+
+    Runs on GPU hosts too, since it needs resolution to fail rather than a device
+    to be absent.
+
+    The soname probe has to happen in the subprocess: this module loads the
+    runtime by absolute path at import, and once it is loaded, ``dlopen`` by
+    soname succeeds against the already-loaded object. Probing in the parent
+    would report every rung as resolvable and quietly disable this test.
+    """
+    script = textwrap.dedent(
+        """
+        import re
+        import sys
+
+        with open("/proc/self/maps") as f:
+            assert not re.search(r"libcudart\\.so", f.read()), "runtime already mapped"
+
+        # If the loader can find a runtime by bare soname then rung 3 succeeds and
+        # a total failure is not reproducible here. A failed CDLL maps nothing, so
+        # rung 1 stays empty either way.
+        import ctypes
+        for soname in sys.argv[1:]:
+            try:
+                ctypes.CDLL(soname)
+            except OSError:
+                continue
+            print("SKIP", soname)
+            sys.exit(0)
+
+        sys.modules["nvidia"] = None   # rung 2: no importable vendor package
+
+        import numpy as np
+        from echo import Server
+
+        try:
+            Server({"obs": np.zeros((8,), dtype=np.float32)}, 4, pin_host_memory=True)
+        except RuntimeError as e:
+            print(e)
+        else:
+            raise AssertionError("pinning succeeded with every rung disabled")
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script, *SONAMES],
+        capture_output=True,
+        text=True,
+        env={k: v for k, v in os.environ.items() if k != "LD_LIBRARY_PATH"},
+    )
+    assert result.returncode == 0, result.stderr
+    if result.stdout.startswith("SKIP"):
+        pytest.skip(f"{result.stdout.split()[1]} resolves by soname, so rung 3 succeeds")
+    message = result.stdout
+
+    # A rung that ran and found nothing reports itself as `(none)`, so the message
+    # cannot be mistaken for one where that rung never ran at all. Then every
+    # soname actually attempted, versioned before unversioned. Ordering is the
+    # part worth pinning down: reordering the rungs is how this feature broke.
+    expected = [
+        "(none) [already-loaded scan]",
+        "(none) [installed-wheel search]",
+        *(f"{soname} [soname load]" for soname in SONAMES),
+    ]
+    positions = [message.find(fragment) for fragment in expected]
+    missing = [f for f, p in zip(expected, positions) if p < 0]
+    assert not missing, f"absent from the message: {missing}\n{message}"
+    assert positions == sorted(positions), f"rungs reported out of order:\n{message}"
+    assert "Install a CUDA runtime" in message, message
 
 
 @requires_gpu
