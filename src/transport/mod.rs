@@ -11,4 +11,8 @@ pub use tcp::TcpTransport;
 pub trait Transport: Send + Sync {
     fn start(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
     fn shutdown(&self);
+
+    fn port(&self) -> Option<u16> {
+        None
+    }
 }

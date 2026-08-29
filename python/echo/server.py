@@ -78,6 +78,11 @@ class Server:
         """Start the transport (bind port, accept connections)."""
         self._server.start()
 
+    @property
+    def port(self) -> int:
+        """The port the transport is listening on, valid after ``start()``."""
+        return self._server.port
+
     def sample(self) -> Sample | None:
         """
         Block until a batch is ready. Returns None on shutdown.

@@ -26,13 +26,27 @@ message. Throughput is governed by the network and the drainer rate.
 
 `TcpTransport` takes:
 
-- `port`: bind port on the server side.
+- `port`: bind port on the server side. Pass `0` to let the OS assign one.
 - `num_threads` (default 8): worker threads used by the server to accept
   connections and push into SPSC queues. Bumping this only helps if you
   have many concurrent connections.
 
 `TcpClient` takes `max_inflight_msgs` (default 32), which caps the number
 of un-acked sends in flight via a `BoundedSemaphore`.
+
+## Finding the port
+
+`Server.start()` binds before it returns, so `Server.port` reports where
+the transport actually landed:
+
+```python
+server = Server(example, batch_size=32, transport=TcpTransport(port=0))
+server.start()
+print(server.port)  # e.g. 42201 — publish this to your clients
+```
+
+Passing `0` and reading the port back lets you run several servers on a
+host without hand-allocating port numbers.
 
 ## Backpressure model
 

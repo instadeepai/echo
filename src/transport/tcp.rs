@@ -40,6 +40,7 @@ pub fn encode_handshake(specs: &[ArraySpec]) -> Vec<u8> {
 struct State {
     _runtime: tokio::runtime::Runtime,
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    port: u16,
 }
 
 pub struct TcpTransport {
@@ -74,6 +75,13 @@ impl super::Transport for TcpTransport {
             return Err("TCP server already started".into());
         }
 
+        // Bind here rather than inside the spawned task: a `start` that
+        // returns then means the port is bound.
+        let addr: std::net::SocketAddr = ([0, 0, 0, 0], self.port).into();
+        let listener = std::net::TcpListener::bind(addr)?;
+        listener.set_nonblocking(true)?;
+        let port = listener.local_addr()?.port();
+
         // Bound transport threads so the drainer pool has CPU left.
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(self.num_threads)
@@ -84,10 +92,9 @@ impl super::Transport for TcpTransport {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let drainer_pool = self.drainer_pool.clone();
         let specs = self.specs.clone();
-        let addr: std::net::SocketAddr = ([0, 0, 0, 0], self.port).into();
 
         rt.spawn(async move {
-            if let Err(e) = run_server(drainer_pool, specs, addr, shutdown_rx).await {
+            if let Err(e) = run_server(drainer_pool, specs, listener, shutdown_rx).await {
                 eprintln!("TCP server error: {e}");
             }
         });
@@ -95,6 +102,7 @@ impl super::Transport for TcpTransport {
         *state = Some(State {
             _runtime: rt,
             shutdown_tx: Some(shutdown_tx),
+            port,
         });
         Ok(())
     }
@@ -108,17 +116,22 @@ impl super::Transport for TcpTransport {
         }
         *state = None;
     }
+
+    fn port(&self) -> Option<u16> {
+        self.state.lock().as_ref().map(|s| s.port)
+    }
 }
 
 async fn run_server(
     drainer_pool: Arc<DrainerPool>,
     specs: Vec<ArraySpec>,
-    addr: std::net::SocketAddr,
+    listener: std::net::TcpListener,
     shutdown_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let handshake = encode_handshake(&specs);
     let payload_size: usize = specs.iter().map(|s| s.num_bytes()).sum();
-    let listener = TcpListener::bind(addr).await?;
+    // Registers with this runtime's reactor, so it has to happen in-task.
+    let listener = TcpListener::from_std(listener)?;
 
     tokio::select! {
         _ = async {

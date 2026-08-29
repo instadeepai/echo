@@ -148,3 +148,21 @@ class TestTcpPartialReads:
         sample = server.sample()
         assert sample is not None
         np.testing.assert_array_equal(sample.batch["obs"], [[1, 2, 3, 4]])
+
+
+class TestPort:
+    def test_ephemeral_port_is_reported_and_listening(self):
+        example = {"obs": np.zeros((4,), dtype=np.float32)}
+        server = Server(example, batch_size=10, transport=TcpTransport(port=0))
+        server.start()
+        try:
+            assert server.port != 0
+            wait_for_listen(server.port)
+        finally:
+            server.close()
+
+    def test_port_before_start_raises(self):
+        example = {"obs": np.zeros((4,), dtype=np.float32)}
+        server = Server(example, batch_size=10, transport=TcpTransport(port=0))
+        with pytest.raises(RuntimeError, match="not started"):
+            server.port
