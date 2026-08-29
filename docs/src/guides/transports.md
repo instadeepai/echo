@@ -31,6 +31,9 @@ message. Throughput is governed by the network and the drainer rate.
   connections and push into SPSC queues. Bumping this only helps if you
   have many concurrent connections.
 
+`TcpClient` takes `max_inflight_msgs` (default 32), which caps the number
+of un-acked sends in flight via a `BoundedSemaphore`.
+
 ## Finding the port
 
 `Server.start()` binds before it returns, so `Server.port` reports where
