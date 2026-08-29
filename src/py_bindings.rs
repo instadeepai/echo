@@ -195,6 +195,16 @@ impl PyServer {
             .map_err(|e| PyRuntimeError::new_err(format!("failed to start transport: {e}")))
     }
 
+    /// The port the transport is listening on, once started.
+    #[getter]
+    fn port(&self) -> PyResult<u16> {
+        let t = self.transport.as_ref().ok_or_else(|| {
+            PyRuntimeError::new_err("no transport configured; pass TcpTransport to __init__")
+        })?;
+        t.port()
+            .ok_or_else(|| PyRuntimeError::new_err("transport not started; call start() first"))
+    }
+
     /// Block until a batch is ready.
     ///
     /// Returns `(arrays, info)` where `arrays` is a list of uint8 numpy views

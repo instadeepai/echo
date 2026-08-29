@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `Server.port` reports the port the transport is listening on, so
+  `TcpTransport(port=0)` can leave the choice to the OS. To make the assigned
+  port knowable, the listener now binds in `start()` rather than in the accept
+  task it spawns — which also means a failed bind raises out of `start()`
+  instead of only reaching stderr.
+
 ## [0.2.0] - 2026-08-03
 
 ### Added

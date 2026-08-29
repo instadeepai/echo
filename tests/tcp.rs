@@ -254,3 +254,27 @@ async fn test_server_clean_disconnect_between_frames() {
     pool.shutdown();
     cleanup(transport, pool).await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_port_reports_the_os_assigned_bind() {
+    let specs = vec![ArraySpec::new(vec![4], 1)];
+    let (_store, pool) = make_pool(&specs, 4, 2);
+    let transport = TcpTransport::new(1, pool.clone(), specs.clone(), 0);
+    assert_eq!(transport.port(), None, "nothing is bound before start");
+
+    transport.start().unwrap();
+    let port = transport.port().expect("a started transport has a port");
+    assert_ne!(
+        port, 0,
+        "port 0 asks for an assignment, it is never the answer"
+    );
+
+    // The number is only worth anything if that's where connections land.
+    let mut stream = connect_with_retry(port).await;
+    let expected = encode_handshake(&specs);
+    assert_eq!(read_exact(&mut stream, expected.len()).await, expected);
+
+    drop(stream);
+    pool.shutdown();
+    cleanup(transport, pool).await;
+}
