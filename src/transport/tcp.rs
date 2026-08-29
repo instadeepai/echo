@@ -40,8 +40,6 @@ pub fn encode_handshake(specs: &[ArraySpec]) -> Vec<u8> {
 struct State {
     _runtime: tokio::runtime::Runtime,
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
-    /// What the listener actually bound to. Equals `requested_port` unless
-    /// that was 0, in which case the OS chose it.
     port: u16,
 }
 
@@ -49,7 +47,7 @@ pub struct TcpTransport {
     num_threads: usize,
     drainer_pool: Arc<DrainerPool>,
     specs: Vec<ArraySpec>,
-    requested_port: u16,
+    port: u16,
     state: Mutex<Option<State>>,
 }
 
@@ -64,7 +62,7 @@ impl TcpTransport {
             num_threads,
             drainer_pool,
             specs,
-            requested_port: port,
+            port,
             state: Mutex::new(None),
         }
     }
@@ -78,9 +76,8 @@ impl super::Transport for TcpTransport {
         }
 
         // Bind here rather than inside the spawned task: a `start` that
-        // returns then means the port is bound and backlogging connections,
-        // and `requested_port = 0` has an OS-assigned port to report.
-        let addr: std::net::SocketAddr = ([0, 0, 0, 0], self.requested_port).into();
+        // returns then means the port is bound.
+        let addr: std::net::SocketAddr = ([0, 0, 0, 0], self.port).into();
         let listener = std::net::TcpListener::bind(addr)?;
         listener.set_nonblocking(true)?;
         let port = listener.local_addr()?.port();

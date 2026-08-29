@@ -80,12 +80,7 @@ class Server:
 
     @property
     def port(self) -> int:
-        """The port the transport is listening on, valid after ``start()``.
-
-        Pass ``TcpTransport(port=0)`` to let the OS assign one and read it
-        back here. Raises RuntimeError before ``start()`` or without a
-        transport.
-        """
+        """The port the transport is listening on, valid after ``start()``."""
         return self._server.port
 
     def sample(self) -> Sample | None:
