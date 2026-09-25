@@ -108,6 +108,7 @@ impl FifoSampler {
 }
 
 impl Sampler for FifoSampler {
+    #[inline]
     fn commit(&self, pos: usize) {
         let batch_id = (pos / self.batch_size) % self.num_buffers;
         // AcqRel pairs with the consumer's Acquire load in `select`.
@@ -119,6 +120,7 @@ impl Sampler for FifoSampler {
         }
     }
 
+    #[inline]
     fn commit_batch(&self, start_pos: usize, n: usize) {
         // Caller guarantees [start_pos, start_pos+n) stays within one batch.
         debug_assert_eq!(
@@ -216,10 +218,13 @@ impl Default for FifoRemover {
 }
 
 impl Remover for FifoRemover {
+    #[inline]
     fn remove(&self, count: usize) {
         self.read_cursor.fetch_add(count, Ordering::Release);
     }
 
+    // Read on every CAS attempt in `Store::try_reserve_slots`.
+    #[inline]
     fn read_pos(&self) -> usize {
         self.read_cursor.load(Ordering::Acquire)
     }

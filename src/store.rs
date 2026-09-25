@@ -20,6 +20,28 @@ pub struct ConsumerView {
     pub count: usize,
 }
 
+/// Source bytes `insert_batch` keeps resident while it makes one pass per array.
+const TILE_BYTES: usize = 128 * 1024;
+
+/// Payload at which array-major stops paying for itself. A single sample this
+/// large already evicts the start of the tile from L1, so the next array pass
+/// re-reads from L2 or memory and the tiling buys nothing back.
+const SAMPLE_MAJOR_ABOVE: usize = 32 * 1024;
+
+/// How many samples `insert_batch` copies per array pass.
+///
+/// A pytree of many small arrays keeps a wide tile in cache across every array
+/// pass, so it wants the widest tile the budget allows. A pytree of a few large
+/// arrays cannot, and gets `tile == 1` — sample-major, one streaming pass over
+/// the source, which is what that shape wants.
+fn tile_samples(array_sizes: &[usize]) -> usize {
+    let payload: usize = array_sizes.iter().sum();
+    if payload >= SAMPLE_MAJOR_ABOVE {
+        return 1;
+    }
+    (TILE_BYTES / payload.max(1)).max(1)
+}
+
 pub struct Store {
     ring: PytreeRingBuf,
     sampler: Box<dyn Sampler>,
@@ -211,6 +233,7 @@ impl Store {
         array_sizes: &[usize],
         metrics: Option<&DrainerMetrics>,
     ) {
+        let tile = tile_samples(array_sizes);
         let mut done = 0;
         while done < samples.len() {
             let notified = self.space_available.notified();
@@ -223,18 +246,47 @@ impl Store {
             };
             #[cfg(feature = "detailed-metrics")]
             let memcpy_start = metrics.map(|_| Instant::now());
-            for i in 0..n {
-                let pos = start + i;
-                let slot = pos % self.capacity;
-                let sample = samples[done + i];
+            // `try_reserve_slots` caps the run at the batch boundary and capacity
+            // is a multiple of batch_size, so [start, start+n) never wraps: one
+            // modulo for the whole run instead of a division per slot.
+            let slot_start = start % self.capacity;
+            debug_assert!(slot_start + n <= self.capacity, "reservation wrapped");
+            // Array-major within a tile of samples. Going array-major is what
+            // makes the destination contiguous — one array's reserved slots are
+            // adjacent — and lifts the layout lookup out of the inner loop. The
+            // tile is what keeps it affordable: each array pass re-reads the
+            // tile's source bytes, so the tile is sized to stay in cache. See
+            // `tile_samples`.
+            let mut base = 0;
+            while base < n {
+                let tile_n = tile.min(n - base);
                 let mut offset = 0;
                 for (j, &size) in array_sizes.iter().enumerate() {
-                    unsafe {
-                        let dst = self.ring.slot_mut(slot, j);
-                        std::ptr::copy_nonoverlapping(sample.as_ptr().add(offset), dst, size);
+                    // SAFETY: array_sizes mirrors self.specs, which sized the
+                    // ring, so j < self.ring.num_arrays().
+                    let layout = unsafe { self.ring.array_layout(j) };
+                    debug_assert_eq!(
+                        size,
+                        layout.slot_bytes(),
+                        "array_sizes must match the ring's slot layout"
+                    );
+                    // SAFETY: slot_start + n <= capacity and base + tile_n <= n,
+                    // and the reservation gives this writer exclusive use of
+                    // [slot_start, slot_start + n).
+                    let mut dst = unsafe { layout.slot(slot_start + base) };
+                    for i in 0..tile_n {
+                        // SAFETY: done + base + i < done + n <= samples.len().
+                        // `dst` steps by the ring's own stride, so it stays
+                        // inside this array's reserved slots regardless of `size`.
+                        unsafe {
+                            let src = samples.get_unchecked(done + base + i).as_ptr().add(offset);
+                            std::ptr::copy_nonoverlapping(src, dst, size);
+                            dst = dst.add(layout.slot_bytes());
+                        }
                     }
                     offset += size;
                 }
+                base += tile_n;
             }
             if let Some(m) = metrics {
                 #[cfg(feature = "detailed-metrics")]

@@ -36,6 +36,23 @@ default = []
 # Mutex-lock per recording, so default builds don't pay for it.
 detailed-metrics = ["dep:hdrhistogram"]
 
+[profile.release]
+# The hot insert path spans echo, crossbeam and tokio, and the default 16
+# codegen units let a small `#[inline]` candidate land in a different unit from
+# its caller and stay un-inlined. One unit plus fat LTO is worth the slower
+# build for a library whose whole job is latency.
+lto = "fat"
+codegen-units = 1
+# panic stays at the default "unwind" on purpose: pyo3 turns a Rust panic into
+# a Python exception by catching the unwind, and the config asserts in
+# `Store::new` / `PytreeRingBuf::new` are reachable from Python. With
+# panic = "abort", a bad `batch_size` would abort the interpreter instead of
+# raising.
+
+[[bench]]
+name = "insert"
+harness = false
+
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 tempfile = "3"

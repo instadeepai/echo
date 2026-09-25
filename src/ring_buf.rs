@@ -15,11 +15,46 @@ use std::path::PathBuf;
 
 use crate::host_pinning::{self, CudaApi, PinError, Region};
 
+/// Where one array lives in the ring: its slot 0, and the stride between
+/// consecutive slots. See [`PytreeRingBuf::array_layout`].
+#[derive(Clone, Copy)]
+pub struct ArrayLayout {
+    base: *mut u8,
+    slot_bytes: usize,
+}
+
+impl ArrayLayout {
+    /// Pointer to `slot`'s data within this array.
+    ///
+    /// # Safety
+    /// `slot` must be `< capacity` of the originating ring, and the caller must
+    /// have exclusive access to this `(array, slot)` pair.
+    #[inline(always)]
+    pub unsafe fn slot(&self, slot: usize) -> *mut u8 {
+        self.base.add(slot * self.slot_bytes)
+    }
+
+    /// Bytes per slot — also the stride between consecutive slots.
+    #[inline(always)]
+    pub fn slot_bytes(&self) -> usize {
+        self.slot_bytes
+    }
+}
+
 pub struct PytreeRingBuf {
     /// One contiguous buffer per array in the flattened pytree.
     buffers: Vec<UnsafeCell<Vec<u8>>>,
-    /// Bytes per slot for each array.
-    slot_bytes: Vec<usize>,
+    /// Base pointer and stride per array, resolved once in `new`.
+    ///
+    /// This is the write path's index, not `buffers`: deriving a slot address
+    /// from `buffers` costs a bounds check and a load through the `UnsafeCell`
+    /// on every access, and the compiler cannot hoist either, because writes
+    /// through the resulting pointer may alias the `Vec` header it just read.
+    ///
+    /// Sound because the pointers address the heap allocations, not this
+    /// struct: moving a `PytreeRingBuf` moves only the `Vec` headers, and the
+    /// buffers are sized once in `new` and never resized.
+    layouts: Vec<ArrayLayout>,
     /// Total number of slots.
     capacity: usize,
     /// The runtime the buffers are registered with, once they are. `Some` is
@@ -45,9 +80,19 @@ impl PytreeRingBuf {
             .map(|&bytes| UnsafeCell::new(vec![0u8; bytes * capacity]))
             .collect();
 
+        let layouts = buffers
+            .iter()
+            .zip(&slot_bytes)
+            .map(|(cell, &bytes)| ArrayLayout {
+                // SAFETY: sole access — `buffers` is local and not yet shared.
+                base: unsafe { (*cell.get()).as_mut_ptr() },
+                slot_bytes: bytes,
+            })
+            .collect();
+
         Self {
             buffers,
-            slot_bytes,
+            layouts,
             capacity,
             pinned_with: None,
         }
@@ -92,12 +137,32 @@ impl PytreeRingBuf {
             .collect()
     }
 
+    #[inline]
     pub fn capacity(&self) -> usize {
         self.capacity
     }
 
+    #[inline]
     pub fn num_arrays(&self) -> usize {
-        self.slot_bytes.len()
+        self.layouts.len()
+    }
+
+    /// One array's base pointer and per-slot stride. A plain indexed load of a
+    /// value resolved in `new` — cheap enough to call per slot, and cheaper
+    /// still hoisted out of a loop over slots of the same array.
+    ///
+    /// # Safety
+    /// - `array_idx` must be `< self.num_arrays()`
+    /// - The layout points into `self`'s allocation. It stays valid for as long
+    ///   as the ring lives, but the caller carries the same disjointness
+    ///   obligation as [`Self::slot_mut`] for every slot it writes through.
+    #[inline]
+    pub unsafe fn array_layout(&self, array_idx: usize) -> ArrayLayout {
+        debug_assert!(
+            array_idx < self.layouts.len(),
+            "array_idx {array_idx} out of bounds"
+        );
+        *self.layouts.get_unchecked(array_idx)
     }
 
     /// Mutable pointer to a slot's array data for writing.
@@ -108,18 +173,14 @@ impl PytreeRingBuf {
     ///   may read or write the same `(array_idx, slot)` pair concurrently.
     ///
     /// Different slot indices access non-overlapping memory regions.
+    #[inline]
     pub unsafe fn slot_mut(&self, slot: usize, array_idx: usize) -> *mut u8 {
         debug_assert!(
             slot < self.capacity,
             "slot {slot} out of bounds (capacity {})",
             self.capacity
         );
-        debug_assert!(
-            array_idx < self.slot_bytes.len(),
-            "array_idx {array_idx} out of bounds"
-        );
-        let offset = slot * self.slot_bytes[array_idx];
-        (*self.buffers[array_idx].get()).as_mut_ptr().add(offset)
+        self.array_layout(array_idx).slot(slot)
     }
 
     /// Immutable view into a slot's array data.
@@ -129,11 +190,8 @@ impl PytreeRingBuf {
             "slot {slot} out of bounds (capacity {})",
             self.capacity
         );
-        debug_assert!(
-            array_idx < self.slot_bytes.len(),
-            "array_idx {array_idx} out of bounds"
-        );
-        let bytes = self.slot_bytes[array_idx];
+        // Indexing `layouts` keeps the array bound checked on this safe path.
+        let bytes = self.layouts[array_idx].slot_bytes();
         let offset = slot * bytes;
         let buf = unsafe { &*self.buffers[array_idx].get() };
         &buf[offset..offset + bytes]
@@ -148,11 +206,10 @@ impl PytreeRingBuf {
             "range must not wrap: start={start} count={count} capacity={}",
             self.capacity
         );
-        let bytes = self.slot_bytes[array_idx];
-        let offset = start * bytes;
-        let buf = unsafe { &*self.buffers[array_idx].get() };
-        let ptr = buf.as_ptr().wrapping_add(offset);
-        (ptr as usize, count * bytes)
+        // Once per array per batch — the bound check stays, this is not hot.
+        let layout = self.layouts[array_idx];
+        let ptr = layout.base.wrapping_add(start * layout.slot_bytes());
+        (ptr as usize, count * layout.slot_bytes())
     }
 }
 
