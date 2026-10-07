@@ -36,6 +36,10 @@ default = []
 # Mutex-lock per recording, so default builds don't pay for it.
 detailed-metrics = ["dep:hdrhistogram"]
 
+[[bench]]
+name = "micro"
+harness = false
+
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 tempfile = "3"

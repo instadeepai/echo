@@ -51,9 +51,33 @@ Rust tests look under `.venv/lib/python*/site-packages/nvidia` in the checkout.
 
 ```bash
 just bench               # ray-based, requires uv sync --extra distributed
+just bench-rs            # Rust micro-benchmarks, ~1 minute
+just bench-rs insert_batch   # only benches whose name matches the regex
 ```
 
 Benchmark results land in `benches/`.
+
+`benches/micro.rs` drives the Rust hot path directly, with no network or
+drainer runtime. Each group runs over four pytree shapes: `atari`, `small`,
+`medium` and `large`. `large` is the pytree `bench_distributed.py` sends, and it
+peaks at about 800 MB resident.
+
+| Group | Measures |
+|---|---|
+| `memcpy` | The raw ring writes alone: the floor under `insert_batch`. |
+| `insert_batch` | The drainer's insert path for one batch, plus the `sample` that releases it. |
+| `reservation` | `insert_batch` with 1-byte samples, in chunks of 1, 16 or 256: the per-reservation cost. |
+| `fifo_sampler` | `FifoSampler::commit_batch` and `select` on their own. |
+| `sample` | The consumer's `Store::sample`, which scales with the number of arrays. |
+| `drain_round` | A full drainer round over 32 connections. |
+
+To compare a change against `main`, save a baseline on `main`, then compare
+against it on your branch:
+
+```bash
+just bench-rs --save-baseline main   # on main
+just bench-rs --baseline main        # on your branch
+```
 
 ## Docs
 
@@ -97,6 +121,7 @@ hot-reload the corresponding API page.
 - `just install`: editable install in dev profile.
 - `just develop`: dev build with `detailed-metrics`, for perf work.
 - `just build-whl`: manylinux release wheel.
-- `just bench`: benchmarks.
+- `just bench`: distributed benchmark.
+- `just bench-rs`: Rust micro-benchmarks.
 - `just docs-serve`: live-reload docs.
 - `just docs`: build static docs.
