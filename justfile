@@ -8,6 +8,10 @@ default:
 bench:
     uv run --extra distributed benches/bench_distributed.py
 
+# Run the Rust micro-benchmarks (pass a filter to narrow, e.g. just bench-rs insert_batch)
+bench-rs *ARGS:
+    cargo bench --bench micro -- {{ARGS}}
+
 # Build a manylinux wheel (default python3.10, override with: just build-whl python3.12)
 build-whl PYTHON="python3.10":
     maturin build --release -i {{PYTHON}}
